@@ -1,0 +1,81 @@
+import { Pool, PoolConfig } from 'pg';
+import { logger } from '../utils/logger';
+
+const poolConfig: PoolConfig = {
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME || 'agentic_workflow',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
+  min: parseInt(process.env.DB_POOL_MIN || '2'),
+  max: parseInt(process.env.DB_POOL_MAX || '10'),
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 2000,
+};
+
+export const pool = new Pool(poolConfig);
+
+pool.on('connect', () => {
+  logger.info('Database connection established');
+});
+
+pool.on('error', (err) => {
+  logger.error({ err }, 'Unexpected database error');
+  process.exit(-1);
+});
+
+export const query = async (text: string, params?: any[]) => {
+  const start = Date.now();
+  try {
+    const result = await pool.query(text, params);
+    const duration = Date.now() - start;
+    logger.debug({ text, duration, rows: result.rowCount }, 'Executed query');
+    return result;
+  } catch (error) {
+    logger.error({ text, error }, 'Query error');
+    throw error;
+  }
+};
+
+export const getClient = async () => {
+  const client = await pool.connect();
+  const originalQuery = client.query;
+  const originalRelease = client.release;
+
+  // Monkey patch the query method to add logging
+  const queryProxy = function (this: any, ...args: any[]): any {
+    const start = Date.now();
+    const result = originalQuery.apply(this, args as any) as any;
+    
+    // Handle promise-based queries
+    if (result && typeof result === 'object' && typeof result.then === 'function') {
+      return result.then((queryResult: any) => {
+        const duration = Date.now() - start;
+        logger.debug({ duration, rows: queryResult.rowCount }, 'Client query executed');
+        return queryResult;
+      });
+    }
+    return result;
+  };
+  client.query = queryProxy as any;
+
+  // Monkey patch the release method to add logging
+  const releaseProxy = function (this: any, err?: Error | boolean): void {
+    logger.debug('Client released');
+    return originalRelease.call(this, err);
+  };
+  client.release = releaseProxy as any;
+
+  return client;
+};
+
+export const testConnection = async (): Promise<boolean> => {
+  try {
+    await query('SELECT NOW()');
+    logger.info('Database connection test successful');
+    return true;
+  } catch (error) {
+    logger.error({ error }, 'Database connection test failed');
+    return false;
+  }
+};

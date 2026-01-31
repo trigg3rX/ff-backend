@@ -1,0 +1,131 @@
+import { Pool } from 'pg';
+import * as dotenv from 'dotenv';
+import { logger } from '../utils/logger';
+import * as migration001 from './001_create_users_table';
+
+// Load environment variables
+dotenv.config();
+
+const pool = new Pool({
+  host: process.env.DB_HOST || 'localhost',
+  port: parseInt(process.env.DB_PORT || '5432'),
+  database: process.env.DB_NAME || 'agentic_workflow',
+  user: process.env.DB_USER || 'postgres',
+  password: process.env.DB_PASSWORD || 'postgres',
+});
+
+interface Migration {
+  id: number;
+  name: string;
+  up: (pool: Pool) => Promise<void>;
+  down: (pool: Pool) => Promise<void>;
+}
+
+const migrations: Migration[] = [
+  {
+    id: 1,
+    name: '001_create_users_table',
+    up: migration001.up,
+    down: migration001.down,
+  },
+];
+
+const createMigrationsTable = async (): Promise<void> => {
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS migrations (
+      id INTEGER PRIMARY KEY,
+      name VARCHAR(255) NOT NULL,
+      executed_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+    );
+  `);
+};
+
+const getExecutedMigrations = async (): Promise<number[]> => {
+  const result = await pool.query('SELECT id FROM migrations ORDER BY id');
+  return result.rows.map((row) => row.id);
+};
+
+const recordMigration = async (id: number, name: string): Promise<void> => {
+  await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2)', [id, name]);
+};
+
+const removeMigration = async (id: number): Promise<void> => {
+  await pool.query('DELETE FROM migrations WHERE id = $1', [id]);
+};
+
+const runMigrations = async (): Promise<void> => {
+  try {
+    logger.info('Starting migrations...');
+
+    await createMigrationsTable();
+    const executedMigrations = await getExecutedMigrations();
+
+    for (const migration of migrations) {
+      if (!executedMigrations.includes(migration.id)) {
+        logger.info(`Executing migration: ${migration.name}`);
+        await migration.up(pool);
+        await recordMigration(migration.id, migration.name);
+        logger.info(`Migration completed: ${migration.name}`);
+      } else {
+        logger.info(`Migration already executed: ${migration.name}`);
+      }
+    }
+
+    logger.info('All migrations completed successfully');
+  } catch (error) {
+    logger.error({ error }, 'Migration failed');
+    throw error;
+  } finally {
+    await pool.end();
+  }
+};
+
+const rollbackLastMigration = async (): Promise<void> => {
+  try {
+    logger.info('Rolling back last migration...');
+
+    await createMigrationsTable();
+    const executedMigrations = await getExecutedMigrations();
+
+    if (executedMigrations.length === 0) {
+      logger.info('No migrations to rollback');
+      return;
+    }
+
+    const lastMigrationId = executedMigrations[executedMigrations.length - 1];
+    const migration = migrations.find((m) => m.id === lastMigrationId);
+
+    if (!migration) {
+      logger.error(`Migration with id ${lastMigrationId} not found`);
+      return;
+    }
+
+    logger.info(`Rolling back migration: ${migration.name}`);
+    await migration.down(pool);
+    await removeMigration(migration.id);
+    logger.info(`Rollback completed: ${migration.name}`);
+  } catch (error) {
+    logger.error({ error }, 'Rollback failed');
+    throw error;
+  } finally {
+    await pool.end();
+  }
+};
+
+// CLI interface
+const command = process.argv[2];
+
+if (command === 'up') {
+  runMigrations().catch((error) => {
+    logger.error({ error }, 'Failed to run migrations');
+    process.exit(1);
+  });
+} else if (command === 'down') {
+  rollbackLastMigration().catch((error) => {
+    logger.error({ error }, 'Failed to rollback migration');
+    process.exit(1);
+  });
+} else {
+  logger.info('Usage: node run.js [up|down]');
+  process.exit(1);
+}
