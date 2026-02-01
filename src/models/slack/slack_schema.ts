@@ -56,4 +56,19 @@ export const sendSlackMessageSchema = Joi.object({
     'any.required': 'Message text is required',
     'string.max': 'Message text must not exceed 4000 characters',
   }),
+  channelId: Joi.string().optional().messages({
+    'string.base': 'Channel ID must be a string',
+  }),
+});
+
+/**
+ * Validation schema for Slack OAuth callback
+ */
+export const slackOAuthCallbackSchema = Joi.object({
+  code: Joi.string().required().messages({
+    'string.empty': 'OAuth code is required',
+    'any.required': 'OAuth code is required',
+  }),
+  state: Joi.string().optional(),
+  error: Joi.string().optional(),
 });

@@ -158,6 +158,15 @@ export const sendMessage = async (
       );
     }
 
+    // Ensure webhook URL exists for webhook connections
+    if (!connection.webhook_url) {
+      throw new AppError(
+        400,
+        "Webhook URL not found for this connection",
+        "MISSING_WEBHOOK_URL"
+      );
+    }
+    
     // Send message to Slack
     const slackResponse = await fetch(connection.webhook_url, {
       method: "POST",

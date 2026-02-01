@@ -2,6 +2,7 @@ import { Router, Request, Response, NextFunction } from 'express';
 import { verifyPrivyToken, AuthenticatedRequest } from '../../middleware/privy-auth';
 import { validateBody } from '../../middleware/validation';
 import * as slackController from '../../controllers/slack.controller';
+import * as slackOAuthController from '../../controllers/slack-oauth.controller';
 import {
   createSlackWebhookSchema,
   updateSlackWebhookSchema,
@@ -12,7 +13,18 @@ import {
 const router = Router();
 
 /**
- * All Slack routes require Privy authentication
+ * OAuth callback route - must be BEFORE auth middleware
+ * Slack redirects here, so it can't require authentication
+ */
+router.get(
+  '/oauth/callback',
+  (req: Request, res: Response, next: NextFunction) => {
+    slackOAuthController.handleOAuthCallback(req as AuthenticatedRequest, res).catch(next);
+  }
+);
+
+/**
+ * All other Slack routes require Privy authentication
  */
 router.use(verifyPrivyToken);
 
@@ -41,14 +53,36 @@ router.post(
 );
 
 /**
+ * GET /api/v1/integrations/slack/oauth/authorize
+ * Initiate Slack OAuth flow
+ */
+router.get(
+  '/oauth/authorize',
+  (req: Request, res: Response, next: NextFunction) => {
+    slackOAuthController.initiateOAuth(req as AuthenticatedRequest, res).catch(next);
+  }
+);
+
+/**
  * POST /api/v1/integrations/slack/send
- * Send a message via Slack webhook
+ * Send a message via Slack (webhook or OAuth)
  */
 router.post(
   '/send',
   validateBody(sendSlackMessageSchema),
   (req: Request, res: Response, next: NextFunction) => {
-    slackController.sendMessage(req as AuthenticatedRequest, res).catch(next);
+    slackOAuthController.sendMessageOAuth(req as AuthenticatedRequest, res).catch(next);
+  }
+);
+
+/**
+ * GET /api/v1/integrations/slack/connections/:connectionId/channels
+ * List channels for an OAuth connection
+ */
+router.get(
+  '/connections/:connectionId/channels',
+  (req: Request, res: Response, next: NextFunction) => {
+    slackOAuthController.listChannels(req as AuthenticatedRequest, res).catch(next);
   }
 );
 
