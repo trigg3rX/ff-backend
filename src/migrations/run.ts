@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { logger } from '../utils/logger';
 import * as migration001 from './001_create_users_table';
 import * as migration002 from './002_create_slack_connections_table';
+import * as migration003 from './003_encrypt_existing_webhooks';
 
 // Load environment variables
 dotenv.config();
@@ -34,6 +35,12 @@ const migrations: Migration[] = [
     name: '002_create_slack_connections_table',
     up: migration002.up,
     down: migration002.down,
+  },
+  {
+    id: 3,
+    name: '003_encrypt_existing_webhooks',
+    up: migration003.up,
+    down: migration003.down,
   },
 ];
 

@@ -3,6 +3,7 @@ import * as dotenv from 'dotenv';
 import { logger } from '../utils/logger';
 import * as migration001 from './001_create_users_table';
 import * as migration002 from './002_create_slack_connections_table';
+import * as migration003 from './003_encrypt_existing_webhooks';
 
 // Load environment variables
 dotenv.config();
@@ -83,6 +84,7 @@ const resetDatabase = async (): Promise<void> => {
     logger.info('Re-running migrations...');
     await migration001.up(pool);
     await migration002.up(pool);
+    await migration003.up(pool);
 
     // Record migrations
     await pool.query(`
@@ -99,6 +101,10 @@ const resetDatabase = async (): Promise<void> => {
     await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [
       2,
       '002_create_slack_connections_table',
+    ]);
+    await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [
+      3,
+      '003_encrypt_existing_webhooks',
     ]);
 
     logger.info('Database reset completed successfully');

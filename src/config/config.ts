@@ -78,6 +78,13 @@ export const privyConfig = {
 } as const;
 
 /**
+ * Encryption Configuration
+ */
+export const encryptionConfig = {
+  key: getRequiredEnv("ENCRYPTION_KEY"),
+} as const;
+
+/**
  * Supported Chain IDs
  */
 export const SUPPORTED_CHAINS = {
@@ -183,6 +190,7 @@ export const config = {
   database: dbConfig,
   redis: redisConfig,
   privy: privyConfig,
+  encryption: encryptionConfig,
   relayer: relayerConfig,
   chains: chainConfigs,
   safe: safeConfig, // For backwards compatibility
@@ -202,6 +210,18 @@ export function validateConfig(): void {
     throw new Error(
       "RELAYER_PRIVATE_KEY must be 66 characters (0x + 64 hex chars)"
     );
+  }
+
+  // Validate encryption key
+  if (encryptionConfig.key.length !== 64) {
+    throw new Error(
+      "ENCRYPTION_KEY must be 64 hex characters (32 bytes). Generate with: openssl rand -hex 32"
+    );
+  }
+
+  // Validate it's valid hex
+  if (!/^[0-9a-fA-F]{64}$/.test(encryptionConfig.key)) {
+    throw new Error("ENCRYPTION_KEY must be a valid hexadecimal string");
   }
 
   // Validate all chain configurations
