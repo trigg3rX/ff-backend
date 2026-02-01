@@ -119,8 +119,35 @@ export const getBotInfo = async (
 };
 
 /**
+ * Helper to check if bot still has access to a chat
+ */
+async function verifyChatAccess(chatId: string): Promise<TelegramChat | null> {
+    if (!TELEGRAM_BOT_TOKEN) return null;
+
+    try {
+        const url = `${TELEGRAM_API_BASE}${TELEGRAM_BOT_TOKEN}/getChat`;
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ chat_id: chatId }),
+        });
+
+        const data = await response.json() as TelegramApiResponse;
+
+        if (data.ok && data.result) {
+            return data.result as TelegramChat;
+        }
+        return null;
+    } catch {
+        return null;
+    }
+}
+
+/**
  * Get available chats where the bot has been added
  * GET /api/v1/integrations/telegram/chats
+ * 
+ * Verifies each chat is still accessible (bot not removed)
  */
 export const getAvailableChats = async (
     _req: AuthenticatedRequest,
@@ -134,8 +161,8 @@ export const getAvailableChats = async (
             allowed_updates: ['message', 'channel_post', 'my_chat_member'],
         });
 
-        // Extract unique chats
-        const chatMap = new Map<string, TelegramChat>();
+        // Extract unique chat IDs
+        const chatIds = new Set<string>();
 
         for (const update of updates) {
             let chat: TelegramChat | undefined;
@@ -149,23 +176,43 @@ export const getAvailableChats = async (
             }
 
             if (chat) {
-                const chatId = String(chat.id);
-                if (!chatMap.has(chatId)) {
-                    chatMap.set(chatId, chat);
-                }
+                chatIds.add(String(chat.id));
             }
         }
 
-        const chats = Array.from(chatMap.values()).map((chat) => ({
-            id: String(chat.id),
-            title: chat.title || chat.first_name || chat.username || 'Unknown',
-            username: chat.username,
-            type: chat.type,
-        }));
+        // Verify each chat is still accessible (bot not removed)
+        const verifiedChats: Array<{
+            id: string;
+            title: string;
+            username?: string;
+            type: string;
+        }> = [];
+
+        // Check each chat in parallel for speed
+        const verificationPromises = Array.from(chatIds).map(async (chatId) => {
+            const chat = await verifyChatAccess(chatId);
+            if (chat) {
+                return {
+                    id: String(chat.id),
+                    title: chat.title || chat.first_name || chat.username || 'Unknown',
+                    username: chat.username,
+                    type: chat.type,
+                };
+            }
+            return null;
+        });
+
+        const results = await Promise.all(verificationPromises);
+
+        for (const result of results) {
+            if (result) {
+                verifiedChats.push(result);
+            }
+        }
 
         res.json({
             success: true,
-            data: { chats },
+            data: { chats: verifiedChats },
         });
     } catch (error) {
         next(error);
