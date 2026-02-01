@@ -61,7 +61,61 @@ export const createSafe = async (
     const userAddress = req.userWalletAddress;
     const userId = req.userId;
 
+    const chainConfig = getChainConfig(supportedChainId);
+
+    logger.info(
+      {
+        userId,
+        userAddress,
+        chainId: supportedChainId,
+        chainName: chainConfig.name,
+      },
+      "Checking for existing Safe wallet"
+    );
+
+    // Get factory address for the chain
+    const factoryAddress = chainConfig.factoryAddress;
+
+    // Check if user already has a Safe wallet (idempotency check)
+    const relayerService = getRelayerService();
+    const provider = relayerService.getProvider(supportedChainId);
+    const factoryContract = new ethers.Contract(
+      factoryAddress,
+      [
+        "function getSafeWallets(address user) view returns (address[])",
+      ],
+      provider
+    );
+
+    const existingSafes = await factoryContract.getSafeWallets(userAddress);
+
+    if (existingSafes.length > 0) {
+      // Return the first existing Safe (user already has one)
+      const existingSafeAddress = existingSafes[0];
+
+      logger.info(
+        {
+          userId,
+          userAddress,
+          safeAddress: existingSafeAddress,
+          chainId: supportedChainId,
+          chainName: chainConfig.name,
+        },
+        "User already has a Safe wallet, returning existing address"
+      );
+
+      res.json({
+        success: true,
+        data: {
+          safeAddress: existingSafeAddress,
+          txHash: null, // No new transaction was created
+        },
+      });
+      return;
+    }
+
     // Rate limiting: max Safe creations per user per day
+    // Only apply rate limit when actually creating a new Safe
     const rateLimitKey = `create-safe:${userId}`;
     const maxRequestsPerDay = config.rateLimit.maxTxsPerUserPerDay;
     if (!checkRateLimit(rateLimitKey, maxRequestsPerDay, 24 * 60 * 60 * 1000)) {
@@ -72,8 +126,6 @@ export const createSafe = async (
       return;
     }
 
-    const chainConfig = getChainConfig(supportedChainId);
-
     logger.info(
       {
         userId,
@@ -81,11 +133,8 @@ export const createSafe = async (
         chainId: supportedChainId,
         chainName: chainConfig.name,
       },
-      "Creating Safe wallet"
+      "Creating new Safe wallet"
     );
-
-    // Get factory address for the chain
-    const factoryAddress = chainConfig.factoryAddress;
 
     // Encode createSafeWallet(address) call
     const iface = new ethers.Interface([
@@ -102,8 +151,7 @@ export const createSafe = async (
       "Sending createSafeWallet transaction"
     );
 
-    // Send via relayer
-    const relayerService = getRelayerService();
+    // Send via relayer (already initialized above for reading)
     const { txHash, receipt } = await relayerService.sendTransaction(
       supportedChainId,
       factoryAddress,
