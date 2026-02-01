@@ -1,8 +1,11 @@
 import { Response, NextFunction } from 'express';
 import { AuthenticatedRequest } from '../middleware/privy-auth';
 import { TelegramConnectionModel } from '../models/telegram';
+import { UserModel } from '../models/users';
 import { AppError } from '../middleware/error-handler';
 import { logger } from '../utils/logger';
+import { PrivyClient } from '@privy-io/server-auth';
+import { config } from '../config/config';
 
 function paramString(
     params: Record<string, string | string[] | undefined>,
@@ -205,6 +208,43 @@ export const getConnections = async (
 };
 
 /**
+ * Ensure user exists in database (create if not exists)
+ */
+async function ensureUserExists(userId: string, walletAddress: string): Promise<void> {
+    try {
+        // Check if user already exists
+        const existingUser = await UserModel.findById(userId);
+        if (existingUser) {
+            return; // User already exists
+        }
+
+        // User doesn't exist, need to fetch email from Privy
+        const privyClient = new PrivyClient(config.privy.appId, config.privy.appSecret);
+        const privyUser = await privyClient.getUser(userId);
+
+        // Get email from Privy user
+        const emailAccount = privyUser.linkedAccounts?.find(
+            (account) => account.type === 'email'
+        );
+        const email = emailAccount && 'address' in emailAccount ? emailAccount.address : `${userId}@privy.local`;
+
+        // Create user in database
+        await UserModel.findOrCreate({
+            id: userId,
+            address: walletAddress,
+            email: email,
+            onboarded_at: new Date(),
+        });
+
+        logger.info({ userId, email }, 'User created/ensured in database');
+    } catch (error) {
+        logger.error({ error, userId }, 'Failed to ensure user exists');
+        // Don't throw - let the foreign key error surface if user creation fails
+        // This way we can see the actual error
+    }
+}
+
+/**
  * Save a chat as a connection
  * POST /api/v1/integrations/telegram/connections
  */
@@ -215,9 +255,13 @@ export const createConnection = async (
 ): Promise<void> => {
     try {
         const userId = req.userId;
-        if (!userId) {
+        const walletAddress = req.userWalletAddress;
+        if (!userId || !walletAddress) {
             throw new AppError(401, 'Unauthorized', 'UNAUTHORIZED');
         }
+
+        // Ensure user exists in database before creating connection
+        await ensureUserExists(userId, walletAddress);
 
         const { chatId, chatTitle, chatType, name } = req.body;
 
@@ -263,6 +307,10 @@ export const deleteConnection = async (
         }
 
         const connectionId = paramString(req.params, 'connectionId');
+        if (!connectionId) {
+            throw new AppError(400, 'Invalid connection ID', 'INVALID_INPUT');
+        }
+
         const deleted = await TelegramConnectionModel.delete(connectionId, userId);
 
         if (!deleted) {
