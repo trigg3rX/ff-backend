@@ -85,8 +85,8 @@ router.delete('/connections/:connectionId', (req: Request, res: Response, next: 
  * Get recent messages for a connection (via webhook)
  * GET /connections/:connectionId/messages
  */
-router.get('/connections/:connectionId/messages', (req: Request, res: Response) => {
-    telegramWebhookController.getRecentMessages(req, res);
+router.get('/connections/:connectionId/messages', (req: Request, res: Response, next: NextFunction) => {
+    telegramWebhookController.getRecentMessages(req as AuthenticatedRequest, res, next);
 });
 
 /**

@@ -1,6 +1,9 @@
-import { Request, Response } from 'express';
+import { Request, Response, NextFunction } from 'express';
+import { AuthenticatedRequest } from '../middleware/privy-auth';
+import { TelegramConnectionModel } from '../models/telegram';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
+import { AppError } from '../middleware/error-handler';
 
 // In-memory store for incoming messages (per chat)
 // In production, use Redis or database
@@ -14,6 +17,17 @@ const incomingMessagesStore = new Map<string, Array<{
 
 // Webhook secret for verification (optional security layer)
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
+
+function paramString(
+    params: Record<string, string | string[] | undefined>,
+    key: string
+): string {
+    const v = params[key];
+    const s = Array.isArray(v) ? v[0] : v;
+    if (s == null || s === '')
+        throw new AppError(400, `Missing or invalid parameter: ${key}`, 'INVALID_PARAM');
+    return s;
+}
 
 /**
  * Handle incoming webhook updates from Telegram
@@ -67,7 +81,7 @@ export const handleIncomingWebhook = async (
         }
         incomingMessagesStore.set(chatId, messages);
 
-        logger.debug({ chatId, updateId: update.update_id }, 'Telegram webhook received');
+        logger.info({ chatId, updateId: update.update_id, text: message.text?.substring(0, 50) }, 'Telegram webhook received');
 
         res.json({ ok: true });
     } catch (error) {
@@ -78,26 +92,35 @@ export const handleIncomingWebhook = async (
 };
 
 /**
- * Get recent messages for a chat (from webhook store)
+ * Get recent messages for a connection
  * GET /api/v1/integrations/telegram/connections/:connectionId/messages
  */
 export const getRecentMessages = async (
-    req: Request,
-    res: Response
+    req: AuthenticatedRequest,
+    res: Response,
+    next: NextFunction
 ): Promise<void> => {
     try {
-        // For simplicity, we use chatId directly from query
-        // In production, verify user owns this connection
-        const chatId = req.query.chatId as string;
-
-        if (!chatId) {
-            res.json({
-                success: true,
-                data: { messages: [], note: 'No chatId provided' },
-            });
+        const userId = req.userId;
+        const connectionId = paramString(req.params, 'connectionId');
+        if (!connectionId) {
+            res.status(400).json({ success: false, error: 'Invalid connection ID' });
             return;
         }
 
+        if (!userId) {
+            res.status(401).json({ success: false, error: 'Unauthorized' });
+            return;
+        }
+
+        // Get connection to find chatId
+        const connection = await TelegramConnectionModel.findByIdAndUser(connectionId, userId);
+        if (!connection) {
+            res.status(404).json({ success: false, error: 'Connection not found' });
+            return;
+        }
+
+        const chatId = connection.chat_id;
         const messages = incomingMessagesStore.get(chatId) || [];
 
         res.json({
@@ -105,11 +128,13 @@ export const getRecentMessages = async (
             data: {
                 messages: messages.slice(-50), // Last 50
                 count: messages.length,
+                chatId,
+                chatTitle: connection.chat_title,
             },
         });
     } catch (error) {
         logger.error({ error }, 'Error getting recent messages');
-        res.status(500).json({ success: false, error: 'Failed to get messages' });
+        next(error);
     }
 };
 
