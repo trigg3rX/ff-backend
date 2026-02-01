@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
 import { logger } from '../utils/logger';
 import * as migration001 from './001_create_users_table';
+import * as migration002 from './002_create_slack_connections_table';
 
 // Load environment variables
 dotenv.config();
@@ -81,8 +82,9 @@ const resetDatabase = async (): Promise<void> => {
     // Re-run migrations
     logger.info('Re-running migrations...');
     await migration001.up(pool);
+    await migration002.up(pool);
 
-    // Record migration
+    // Record migrations
     await pool.query(`
       CREATE TABLE IF NOT EXISTS migrations (
         id INTEGER PRIMARY KEY,
@@ -93,6 +95,10 @@ const resetDatabase = async (): Promise<void> => {
     await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [
       1,
       '001_create_users_table',
+    ]);
+    await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [
+      2,
+      '002_create_slack_connections_table',
     ]);
 
     logger.info('Database reset completed successfully');

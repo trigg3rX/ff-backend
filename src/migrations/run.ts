@@ -2,6 +2,7 @@ import { Pool } from 'pg';
 import * as dotenv from 'dotenv';
 import { logger } from '../utils/logger';
 import * as migration001 from './001_create_users_table';
+import * as migration002 from './002_create_slack_connections_table';
 
 // Load environment variables
 dotenv.config();
@@ -27,6 +28,12 @@ const migrations: Migration[] = [
     name: '001_create_users_table',
     up: migration001.up,
     down: migration001.down,
+  },
+  {
+    id: 2,
+    name: '002_create_slack_connections_table',
+    up: migration002.up,
+    down: migration002.down,
   },
 ];
 
