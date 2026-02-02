@@ -84,7 +84,7 @@ export const getSwapExecution = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { id } = req.params;
 
     const swapExecution = await swapExecutionService.getSwapExecution(id);
 

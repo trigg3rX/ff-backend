@@ -1,20 +1,29 @@
-import { Pool } from 'pg';
-import * as dotenv from 'dotenv';
-import { logger } from '../utils/logger';
-import * as migration001 from './001_create_users_table';
-import * as migration002 from './002_create_slack_connections_table';
-import * as migration003 from './003_encrypt_existing_webhooks';
-import * as migration012 from './012_add_slack_oauth_fields';
+import { Pool } from "pg";
+import * as dotenv from "dotenv";
+import { logger } from "../utils/logger";
+import * as migration001 from "./001_create_users_table";
+import * as migration002 from "./002_create_slack_connections_table";
+import * as migration003 from "./003_encrypt_existing_webhooks";
+import * as migration004 from "./004_create_workflows_tables";
+import * as migration005 from "./005_create_workflow_nodes_table";
+import * as migration006 from "./006_create_workflow_edges_table";
+import * as migration007 from "./007_create_workflow_executions_table";
+import * as migration008 from "./008_create_node_executions_table";
+import * as migration009 from "./009_create_swap_executions_table";
+import * as migration010 from "./010_create_managed_wallets_table";
+import * as migration011 from "./011_add_foreign_key_to_workflows";
+import * as migration012 from "./012_add_slack_oauth_fields";
+import * as migration013 from "./013_create_telegram_connections_table";
 
 // Load environment variables
 dotenv.config();
 
 const pool = new Pool({
-  host: process.env.DB_HOST || 'localhost',
-  port: parseInt(process.env.DB_PORT || '5432'),
-  database: process.env.DB_NAME || 'agentic_workflow',
-  user: process.env.DB_USER || 'postgres',
-  password: process.env.DB_PASSWORD || 'postgres',
+  host: process.env.DB_HOST || "localhost",
+  port: parseInt(process.env.DB_PORT || "5432"),
+  database: process.env.DB_NAME || "agentic_workflow",
+  user: process.env.DB_USER || "postgres",
+  password: process.env.DB_PASSWORD || "postgres",
 });
 
 interface Migration {
@@ -27,27 +36,81 @@ interface Migration {
 const migrations: Migration[] = [
   {
     id: 1,
-    name: '001_create_users_table',
+    name: "001_create_users_table",
     up: migration001.up,
     down: migration001.down,
   },
   {
     id: 2,
-    name: '002_create_slack_connections_table',
+    name: "002_create_slack_connections_table",
     up: migration002.up,
     down: migration002.down,
   },
   {
     id: 3,
-    name: '003_encrypt_existing_webhooks',
+    name: "003_encrypt_existing_webhooks",
     up: migration003.up,
     down: migration003.down,
   },
   {
+    id: 4,
+    name: "004_create_workflows_tables",
+    up: migration004.up,
+    down: migration004.down,
+  },
+  {
+    id: 5,
+    name: "005_create_workflow_nodes_table",
+    up: migration005.up,
+    down: migration005.down,
+  },
+  {
+    id: 6,
+    name: "006_create_workflow_edges_table",
+    up: migration006.up,
+    down: migration006.down,
+  },
+  {
+    id: 7,
+    name: "007_create_workflow_executions_table",
+    up: migration007.up,
+    down: migration007.down,
+  },
+  {
+    id: 8,
+    name: "008_create_node_executions_table",
+    up: migration008.up,
+    down: migration008.down,
+  },
+  {
+    id: 9,
+    name: "009_create_swap_executions_table",
+    up: migration009.up,
+    down: migration009.down,
+  },
+  {
+    id: 10,
+    name: "010_create_managed_wallets_table",
+    up: migration010.up,
+    down: migration010.down,
+  },
+  {
+    id: 11,
+    name: "011_add_foreign_key_to_workflows",
+    up: migration011.up,
+    down: migration011.down,
+  },
+  {
     id: 12,
-    name: '012_add_slack_oauth_fields',
+    name: "012_add_slack_oauth_fields",
     up: migration012.up,
     down: migration012.down,
+  },
+  {
+    id: 13,
+    name: "013_create_telegram_connections_table",
+    up: migration013.up,
+    down: migration013.down,
   },
 ];
 
@@ -62,21 +125,24 @@ const createMigrationsTable = async (): Promise<void> => {
 };
 
 const getExecutedMigrations = async (): Promise<number[]> => {
-  const result = await pool.query('SELECT id FROM migrations ORDER BY id');
+  const result = await pool.query("SELECT id FROM migrations ORDER BY id");
   return result.rows.map((row) => row.id);
 };
 
 const recordMigration = async (id: number, name: string): Promise<void> => {
-  await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2)', [id, name]);
+  await pool.query("INSERT INTO migrations (id, name) VALUES ($1, $2)", [
+    id,
+    name,
+  ]);
 };
 
 const removeMigration = async (id: number): Promise<void> => {
-  await pool.query('DELETE FROM migrations WHERE id = $1', [id]);
+  await pool.query("DELETE FROM migrations WHERE id = $1", [id]);
 };
 
 const runMigrations = async (): Promise<void> => {
   try {
-    logger.info('Starting migrations...');
+    logger.info("Starting migrations...");
 
     await createMigrationsTable();
     const executedMigrations = await getExecutedMigrations();
@@ -92,9 +158,9 @@ const runMigrations = async (): Promise<void> => {
       }
     }
 
-    logger.info('All migrations completed successfully');
+    logger.info("All migrations completed successfully");
   } catch (error) {
-    logger.error({ error }, 'Migration failed');
+    logger.error({ error }, "Migration failed");
     throw error;
   } finally {
     await pool.end();
@@ -103,13 +169,13 @@ const runMigrations = async (): Promise<void> => {
 
 const rollbackLastMigration = async (): Promise<void> => {
   try {
-    logger.info('Rolling back last migration...');
+    logger.info("Rolling back last migration...");
 
     await createMigrationsTable();
     const executedMigrations = await getExecutedMigrations();
 
     if (executedMigrations.length === 0) {
-      logger.info('No migrations to rollback');
+      logger.info("No migrations to rollback");
       return;
     }
 
@@ -126,7 +192,7 @@ const rollbackLastMigration = async (): Promise<void> => {
     await removeMigration(migration.id);
     logger.info(`Rollback completed: ${migration.name}`);
   } catch (error) {
-    logger.error({ error }, 'Rollback failed');
+    logger.error({ error }, "Rollback failed");
     throw error;
   } finally {
     await pool.end();
@@ -136,17 +202,17 @@ const rollbackLastMigration = async (): Promise<void> => {
 // CLI interface
 const command = process.argv[2];
 
-if (command === 'up') {
+if (command === "up") {
   runMigrations().catch((error) => {
-    logger.error({ error }, 'Failed to run migrations');
+    logger.error({ error }, "Failed to run migrations");
     process.exit(1);
   });
-} else if (command === 'down') {
+} else if (command === "down") {
   rollbackLastMigration().catch((error) => {
-    logger.error({ error }, 'Failed to rollback migration');
+    logger.error({ error }, "Failed to rollback migration");
     process.exit(1);
   });
 } else {
-  logger.info('Usage: node run.js [up|down]');
+  logger.info("Usage: node run.js [up|down]");
   process.exit(1);
 }

@@ -50,8 +50,7 @@ export class UserController {
    */
   static async getUserById(req: Request, res: Response): Promise<void> {
     try {
-      const id = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) ?? '';
-      if (!id) throw new AppError(400, 'Invalid ID', 'INVALID_INPUT');
+      const { id } = req.params;
 
       const user = await UserModel.findById(id);
 
@@ -78,9 +77,9 @@ export class UserController {
    */
   static async getUserByAddress(req: Request, res: Response): Promise<void> {
     try {
-      const address = Array.isArray(req.params.address) ? req.params.address[0] : req.params.address;
+      const { address } = req.params;
 
-      const user = await UserModel.findByAddress(address!);
+      const user = await UserModel.findByAddress(address);
 
       if (!user) {
         throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
@@ -139,8 +138,7 @@ export class UserController {
    */
   static async deleteUser(req: Request, res: Response): Promise<void> {
     try {
-      const id = (Array.isArray(req.params.id) ? req.params.id[0] : req.params.id) ?? '';
-      if (!id) throw new AppError(400, 'Invalid ID', 'INVALID_INPUT');
+      const { id } = req.params;
 
       const deleted = await UserModel.delete(id);
 
@@ -164,3 +162,4 @@ export class UserController {
     }
   }
 }
+

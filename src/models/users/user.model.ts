@@ -161,4 +161,32 @@ export class UserModel {
       throw error;
     }
   }
+
+  /**
+   * Find or create a user (useful for ensuring user exists)
+   * Returns existing user if found, creates new one if not
+   */
+  static async findOrCreate(userData: CreateUserInput): Promise<User> {
+    try {
+      // Try to find existing user by ID
+      const existingUser = await this.findById(userData.id);
+      if (existingUser) {
+        return existingUser;
+      }
+
+      // User doesn't exist, create it
+      return await this.create(userData);
+    } catch (error: any) {
+      // If creation fails due to unique constraint (race condition), try to find again
+      if (error.code === '23505') {
+        const existingUser = await this.findById(userData.id);
+        if (existingUser) {
+          return existingUser;
+        }
+      }
+      logger.error({ error, userId: userData.id }, 'Failed to find or create user');
+      throw error;
+    }
+  }
 }
+

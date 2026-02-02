@@ -2,35 +2,38 @@ import {
   NodeType,
   NodeExecutionInput,
   NodeExecutionOutput,
-  SwapNodeConfig,
-  SwapProvider,
-  SupportedChain,
 } from '../../../types';
+import {
+  LendingNodeConfig,
+  LendingProvider,
+  SupportedChain,
+  LendingOperation,
+} from '../../../types/lending.types';
 import { INodeProcessor } from '../interfaces/INodeProcessor';
-import { swapExecutionService } from '../../swap/SwapExecutionService';
+import { lendingExecutionService } from '../../lending/LendingExecutionService';
 import { logger } from '../../../utils/logger';
 import { pool } from '../../../config/database';
 
 /**
- * Swap Node Processor
- * Handles execution of swap nodes
+ * Lending Node Processor
+ * Handles execution of lending nodes (supply, borrow, withdraw, repay)
  */
-export class SwapNodeProcessor implements INodeProcessor {
+export class LendingNodeProcessor implements INodeProcessor {
   getNodeType(): NodeType {
-    return NodeType.SWAP;
+    return NodeType.LENDING;
   }
 
   async execute(input: NodeExecutionInput): Promise<NodeExecutionOutput> {
     const startTime = new Date();
-    logger.info({ nodeId: input.nodeId }, 'Executing swap node');
+    logger.info({ nodeId: input.nodeId }, 'Executing lending node');
 
     try {
-      const config: SwapNodeConfig = input.nodeConfig;
+      const config: LendingNodeConfig = input.nodeConfig;
 
       // Validate configuration
       const validation = await this.validate(config);
       if (!validation.valid) {
-        throw new Error(`Invalid swap configuration: ${validation.errors?.join(', ')}`);
+        throw new Error(`Invalid lending configuration: ${validation.errors?.join(', ')}`);
       }
 
       // Get wallet private key from secrets
@@ -45,8 +48,8 @@ export class SwapNodeProcessor implements INodeProcessor {
         input.nodeId
       );
 
-      // Execute the swap
-      const result = await swapExecutionService.executeSwap(
+      // Execute the lending operation
+      const result = await lendingExecutionService.executeLending(
         nodeExecutionId,
         config.chain,
         config.provider,
@@ -62,8 +65,8 @@ export class SwapNodeProcessor implements INodeProcessor {
           success: false,
           output: result,
           error: {
-            message: result.errorMessage || 'Swap execution failed',
-            code: result.errorCode || 'SWAP_FAILED',
+            message: result.errorMessage || 'Lending execution failed',
+            code: result.errorCode || 'LENDING_FAILED',
           },
           metadata: {
             startedAt: startTime,
@@ -79,7 +82,10 @@ export class SwapNodeProcessor implements INodeProcessor {
         output = this.applyOutputMapping(result, config.outputMapping);
       }
 
-      logger.info({ nodeId: input.nodeId, txHash: result.txHash }, 'Swap node executed successfully');
+      logger.info(
+        { nodeId: input.nodeId, txHash: result.txHash, operation: config.inputConfig.operation },
+        'Lending node executed successfully'
+      );
 
       return {
         nodeId: input.nodeId,
@@ -93,7 +99,7 @@ export class SwapNodeProcessor implements INodeProcessor {
       };
     } catch (error) {
       const endTime = new Date();
-      logger.error({ error, nodeId: input.nodeId }, 'Swap node execution failed');
+      logger.error({ error, nodeId: input.nodeId }, 'Lending node execution failed');
 
       return {
         nodeId: input.nodeId,
@@ -101,7 +107,7 @@ export class SwapNodeProcessor implements INodeProcessor {
         output: null,
         error: {
           message: (error as Error).message,
-          code: 'SWAP_NODE_ERROR',
+          code: 'LENDING_NODE_ERROR',
           details: error,
         },
         metadata: {
@@ -121,40 +127,45 @@ export class SwapNodeProcessor implements INodeProcessor {
       return { valid: false, errors };
     }
 
-    const swapConfig = config as SwapNodeConfig;
+    const lendingConfig = config as LendingNodeConfig;
 
     // Validate provider
-    if (!swapConfig.provider || !Object.values(SwapProvider).includes(swapConfig.provider)) {
+    if (!lendingConfig.provider || !Object.values(LendingProvider).includes(lendingConfig.provider)) {
       errors.push('Invalid or missing provider');
     }
 
     // Validate chain
-    if (!swapConfig.chain || !Object.values(SupportedChain).includes(swapConfig.chain)) {
+    if (!lendingConfig.chain || !Object.values(SupportedChain).includes(lendingConfig.chain)) {
       errors.push('Invalid or missing chain');
     }
 
     // Validate input config
-    if (!swapConfig.inputConfig) {
+    if (!lendingConfig.inputConfig) {
       errors.push('Input config is required');
     } else {
-      const inputConfig = swapConfig.inputConfig;
+      const inputConfig = lendingConfig.inputConfig;
 
-      if (!inputConfig.sourceToken?.address) {
-        errors.push('Source token address is required');
+      // Validate operation
+      if (!inputConfig.operation || !Object.values(LendingOperation).includes(inputConfig.operation)) {
+        errors.push('Invalid or missing operation');
       }
 
-      if (!inputConfig.destinationToken?.address) {
-        errors.push('Destination token address is required');
+      // Validate asset
+      if (!inputConfig.asset?.address) {
+        errors.push('Asset address is required');
       }
 
-      if (!inputConfig.amount) {
-        errors.push('Amount is required');
+      // Validate amount (except for collateral enable/disable)
+      if (
+        inputConfig.operation !== LendingOperation.ENABLE_COLLATERAL &&
+        inputConfig.operation !== LendingOperation.DISABLE_COLLATERAL
+      ) {
+        if (!inputConfig.amount) {
+          errors.push('Amount is required');
+        }
       }
 
-      if (!inputConfig.swapType) {
-        errors.push('Swap type is required');
-      }
-
+      // Validate wallet address
       if (!inputConfig.walletAddress) {
         errors.push('Wallet address is required');
       }

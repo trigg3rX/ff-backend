@@ -9,16 +9,27 @@ export const up = async (pool: Pool): Promise<void> => {
     
     logger.info('Adding foreign key constraint to workflows table...');
     
-    // Add foreign key constraint for trigger_node_id
-    await client.query(`
-      ALTER TABLE workflows
-      ADD CONSTRAINT fk_workflows_trigger_node
-      FOREIGN KEY (trigger_node_id)
-      REFERENCES workflow_nodes(id)
-      ON DELETE SET NULL;
+    // Check if constraint already exists
+    const result = await client.query(`
+      SELECT constraint_name 
+      FROM information_schema.table_constraints 
+      WHERE table_name = 'workflows' 
+      AND constraint_name = 'fk_workflows_trigger_node'
     `);
     
-    logger.info('Foreign key constraint added successfully');
+    if (result.rows.length === 0) {
+      // Add foreign key constraint for trigger_node_id
+      await client.query(`
+        ALTER TABLE workflows
+        ADD CONSTRAINT fk_workflows_trigger_node
+        FOREIGN KEY (trigger_node_id)
+        REFERENCES workflow_nodes(id)
+        ON DELETE SET NULL;
+      `);
+      logger.info('Foreign key constraint added successfully');
+    } else {
+      logger.info('Foreign key constraint already exists, skipping');
+    }
     
     await client.query('COMMIT');
   } catch (error) {

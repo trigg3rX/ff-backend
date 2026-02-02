@@ -4,9 +4,14 @@ import { logger } from '../utils/logger';
 export const up = async (pool: Pool): Promise<void> => {
     logger.info('Running migration: 003_add_slack_oauth_fields');
 
-    // Add connection_type enum
+    // Add connection_type enum (skip if already exists)
     await pool.query(`
-    CREATE TYPE slack_connection_type AS ENUM ('webhook', 'oauth');
+    DO $$
+    BEGIN
+      IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'slack_connection_type') THEN
+        CREATE TYPE slack_connection_type AS ENUM ('webhook', 'oauth');
+      END IF;
+    END$$;
   `);
 
     // Add new columns for OAuth support

@@ -326,15 +326,20 @@ export class WorkflowExecutionEngine {
     // This should load encrypted secrets from a secure store (e.g., AWS KMS, HashiCorp Vault)
     // and decrypt them for use in execution
 
-    // For now, return empty object
-    // In production, this would load and decrypt:
+    // For now, load from environment variables
+    // In production, this would load and decrypt from secure storage:
     // - Wallet private keys
     // - API keys for providers
     // - Other sensitive credentials
 
-    return {
-      // WALLET_PRIVATE_KEY: await decryptSecret(userId, 'wallet_private_key'),
-    };
+    const secrets: Record<string, string> = {};
+
+    // Load wallet private key from environment
+    if (process.env.WALLET_PRIVATE_KEY) {
+      secrets.WALLET_PRIVATE_KEY = process.env.WALLET_PRIVATE_KEY;
+    }
+
+    return secrets;
   }
 
   /**

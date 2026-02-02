@@ -5,17 +5,6 @@ import { ApiResponse } from "../types";
 import { AppError } from "../middleware/error-handler";
 import { logger } from "../utils/logger";
 
-function paramString(
-  params: Record<string, string | string[] | undefined>,
-  key: string
-): string {
-  const v = params[key];
-  const s = Array.isArray(v) ? v[0] : v;
-  if (s == null || s === "")
-    throw new AppError(400, `Missing or invalid parameter: ${key}`, "INVALID_PARAM");
-  return s;
-}
-
 /**
  * POST /api/v1/integrations/slack/test
  * Test a webhook URL without saving (for verification before saving)
@@ -314,7 +303,7 @@ export const updateConnection = async (
 ): Promise<void> => {
   try {
     const userId = req.userId;
-    const connectionId = paramString(req.params, "connectionId");
+    const { connectionId } = req.params;
     const { webhookUrl, name } = req.body;
 
     const connection = await SlackConnectionModel.update(connectionId, userId, {
@@ -362,7 +351,7 @@ export const deleteConnection = async (
 ): Promise<void> => {
   try {
     const userId = req.userId;
-    const connectionId = paramString(req.params, "connectionId");
+    const { connectionId } = req.params;
 
     const deleted = await SlackConnectionModel.delete(connectionId, userId);
 

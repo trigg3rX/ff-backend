@@ -34,3 +34,6 @@ export interface ApiResponse<T = any> {
 // Re-export all swap-related types
 export * from './swap.types';
 
+// Re-export all lending-related types
+export * from './lending.types';
+

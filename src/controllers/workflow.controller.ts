@@ -391,7 +391,7 @@ export const executeWorkflow = async (
   next: NextFunction
 ): Promise<void> => {
   try {
-    const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    const { id } = req.params;
     const userId = (req as any).user?.id || req.body?.userId;
     const { initialInput = {} } = req.body || {};
 
