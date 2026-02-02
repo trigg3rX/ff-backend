@@ -174,7 +174,7 @@ export class SwapNodeProcessor implements INodeProcessor {
     nodeId: string
   ): Promise<string> {
     const result = await pool.query<{ id: string }>(
-      'SELECT id FROM node_executions WHERE execution_id = $1 AND node_id = $2 ORDER BY created_at DESC LIMIT 1',
+      'SELECT id FROM node_executions WHERE execution_id = $1 AND node_id = $2 ORDER BY started_at DESC LIMIT 1',
       [executionId, nodeId]
     );
 
