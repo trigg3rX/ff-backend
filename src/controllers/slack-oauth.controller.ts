@@ -5,17 +5,6 @@ import { ApiResponse } from "../types";
 import { AppError } from "../middleware/error-handler";
 import { logger } from "../utils/logger";
 
-function paramString(
-  params: Record<string, string | string[] | undefined>,
-  key: string
-): string {
-  const v = params[key];
-  const s = Array.isArray(v) ? v[0] : v;
-  if (s == null || s === "")
-    throw new AppError(400, `Missing or invalid parameter: ${key}`, "INVALID_PARAM");
-  return s;
-}
-
 /**
  * GET /api/v1/integrations/slack/oauth/authorize
  * Generate Slack OAuth authorization URL
@@ -274,7 +263,12 @@ export const listChannels = async (
 ): Promise<void> => {
   try {
     const userId = req.userId;
-    const connectionId = paramString(req.params, "connectionId");
+    const connectionId = Array.isArray(req.params.connectionId)
+      ? req.params.connectionId[0]
+      : req.params.connectionId;
+    if (!connectionId) {
+      throw new AppError(400, "Invalid connectionId", "BAD_REQUEST");
+    }
 
     // Verify connection belongs to user and is OAuth type
     const connection = await SlackConnectionModel.findByIdAndUser(
@@ -395,7 +389,12 @@ export const updateConnectionChannel = async (
 ): Promise<void> => {
   try {
     const userId = req.userId;
-    const connectionId = paramString(req.params, "connectionId");
+    const connectionId = Array.isArray(req.params.connectionId)
+      ? req.params.connectionId[0]
+      : req.params.connectionId;
+    if (!connectionId) {
+      throw new AppError(400, "Invalid connectionId", "BAD_REQUEST");
+    }
     const { channelId, channelName } = req.body;
 
     if (!channelId || !channelName) {

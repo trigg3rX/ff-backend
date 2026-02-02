@@ -16,7 +16,7 @@ export const up = async (pool: Pool): Promise<void> => {
       WHERE table_name = 'workflows' 
       AND constraint_name = 'fk_workflows_trigger_node'
     `);
-
+    
     if (result.rows.length === 0) {
       // Add foreign key constraint for trigger_node_id
       await client.query(`

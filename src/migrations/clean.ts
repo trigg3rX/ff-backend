@@ -14,7 +14,6 @@ import * as migration010 from './010_create_managed_wallets_table';
 import * as migration011 from './011_add_foreign_key_to_workflows';
 import * as migration012 from './012_add_slack_oauth_fields';
 import * as migration013 from './013_create_telegram_connections_table';
-import * as migration014 from './014_add_edge_handles';
 
 // Load environment variables
 dotenv.config();
@@ -106,7 +105,6 @@ const resetDatabase = async (): Promise<void> => {
     await migration011.up(pool);
     await migration012.up(pool);
     await migration013.up(pool);
-    await migration014.up();
 
     // Record migrations
     await pool.query(`
@@ -168,10 +166,6 @@ const resetDatabase = async (): Promise<void> => {
       13,
       '013_create_telegram_connections_table',
     ]);
-    await pool.query('INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING', [
-      14,
-      '014_add_edge_handles',
-    ]);
 
     logger.info('Database reset completed successfully');
   } catch (error) {
@@ -201,3 +195,4 @@ if (command === 'truncate') {
   logger.info('  reset    - Drops all tables and re-runs migrations');
   process.exit(1);
 }
+

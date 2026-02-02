@@ -3,7 +3,6 @@ import { AuthenticatedRequest } from '../middleware/privy-auth';
 import { TelegramConnectionModel } from '../models/telegram';
 import { logger } from '../utils/logger';
 import crypto from 'crypto';
-import { AppError } from '../middleware/error-handler';
 
 // In-memory store for incoming messages (per chat)
 // In production, use Redis or database
@@ -17,17 +16,6 @@ const incomingMessagesStore = new Map<string, Array<{
 
 // Webhook secret for verification (optional security layer)
 const WEBHOOK_SECRET = process.env.TELEGRAM_WEBHOOK_SECRET;
-
-function paramString(
-    params: Record<string, string | string[] | undefined>,
-    key: string
-): string {
-    const v = params[key];
-    const s = Array.isArray(v) ? v[0] : v;
-    if (s == null || s === '')
-        throw new AppError(400, `Missing or invalid parameter: ${key}`, 'INVALID_PARAM');
-    return s;
-}
 
 /**
  * Handle incoming webhook updates from Telegram
@@ -102,14 +90,16 @@ export const getRecentMessages = async (
 ): Promise<void> => {
     try {
         const userId = req.userId;
-        const connectionId = paramString(req.params, 'connectionId');
-        if (!connectionId) {
-            res.status(400).json({ success: false, error: 'Invalid connection ID' });
-            return;
-        }
+        const connectionId = Array.isArray(req.params.connectionId)
+            ? req.params.connectionId[0]
+            : req.params.connectionId;
 
         if (!userId) {
             res.status(401).json({ success: false, error: 'Unauthorized' });
+            return;
+        }
+        if (!connectionId) {
+            res.status(400).json({ success: false, error: 'Invalid connectionId' });
             return;
         }
 

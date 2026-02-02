@@ -7,17 +7,6 @@ import { logger } from '../utils/logger';
 import { PrivyClient } from '@privy-io/server-auth';
 import { config } from '../config/config';
 
-function paramString(
-    params: Record<string, string | string[] | undefined>,
-    key: string
-): string {
-    const v = params[key];
-    const s = Array.isArray(v) ? v[0] : v;
-    if (s == null || s === '')
-        throw new AppError(400, `Missing or invalid parameter: ${key}`, 'INVALID_PARAM');
-    return s;
-}
-
 // Centralized bot token from environment
 const TELEGRAM_BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const TELEGRAM_API_BASE = 'https://api.telegram.org/bot';
@@ -353,11 +342,12 @@ export const deleteConnection = async (
             throw new AppError(401, 'Unauthorized', 'UNAUTHORIZED');
         }
 
-        const connectionId = paramString(req.params, 'connectionId');
+        const connectionId = Array.isArray(req.params.connectionId)
+            ? req.params.connectionId[0]
+            : req.params.connectionId;
         if (!connectionId) {
-            throw new AppError(400, 'Invalid connection ID', 'INVALID_INPUT');
+            throw new AppError(400, 'Invalid connectionId', 'BAD_REQUEST');
         }
-
         const deleted = await TelegramConnectionModel.delete(connectionId, userId);
 
         if (!deleted) {

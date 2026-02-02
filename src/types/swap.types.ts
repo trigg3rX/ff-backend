@@ -6,6 +6,7 @@
 export enum SupportedChain {
   ARBITRUM = 'ARBITRUM',
   ARBITRUM_SEPOLIA = 'ARBITRUM_SEPOLIA',
+  ETHEREUM_SEPOLIA = 'ETHEREUM_SEPOLIA',
 }
 
 // Supported Swap Providers
@@ -19,6 +20,7 @@ export enum SwapProvider {
 export enum NodeType {
   TRIGGER = 'TRIGGER',
   SWAP = 'SWAP',
+  LENDING = 'LENDING',
   IF = 'IF',
   SWITCH = 'SWITCH',
   CONDITION = 'CONDITION',
@@ -66,6 +68,13 @@ export interface ChainConfig {
     uniswapRouter?: string;
     uniswapFactory?: string;
     weth?: string;
+    // Aave V3 contracts
+    aavePool?: string;
+    aavePoolDataProvider?: string;
+    aaveWethGateway?: string;
+    // Compound V3 contracts
+    compoundComet?: string;
+    compoundConfigurator?: string;
   };
 }
 

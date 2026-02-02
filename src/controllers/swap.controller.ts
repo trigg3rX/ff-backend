@@ -174,6 +174,10 @@ export const getSwapExecution = async (
 ): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+      res.status(400).json({ success: false, error: 'Invalid id' });
+      return;
+    }
 
     const swapExecution = await swapExecutionService.getSwapExecution(id);
 

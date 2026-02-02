@@ -2,8 +2,7 @@ import { NodeType } from '../../../types';
 import { INodeProcessor, INodeProcessorFactory } from '../interfaces/INodeProcessor';
 import { SwapNodeProcessor } from './SwapNodeProcessor';
 import { EmailNodeProcessor } from './EmailNodeProcessor';
-import { IfNodeProcessor } from './IfNodeProcessor';
-import { SwitchNodeProcessor } from './SwitchNodeProcessor';
+import { LendingNodeProcessor } from './LendingNodeProcessor';
 import { logger } from '../../../utils/logger';
 
 /**
@@ -29,12 +28,8 @@ export class NodeProcessorFactory implements INodeProcessorFactory {
 
       // Register email processor
       this.registerProcessor(new EmailNodeProcessor());
-
-      // Register IF processor
-      this.registerProcessor(new IfNodeProcessor());
-
-      // Register SWITCH processor
-      this.registerProcessor(new SwitchNodeProcessor());
+      // Register lending processor
+      this.registerProcessor(new LendingNodeProcessor());
 
       // TODO: Add other processors as needed
       // this.registerProcessor(new TriggerNodeProcessor());

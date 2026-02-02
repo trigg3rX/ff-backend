@@ -396,6 +396,13 @@ export const executeWorkflow = async (
 ): Promise<void> => {
   try {
     const id = Array.isArray(req.params.id) ? req.params.id[0] : req.params.id;
+    if (!id) {
+      res.status(400).json({
+        success: false,
+        error: { message: 'Invalid workflow id', code: 'BAD_REQUEST' },
+      } as ApiResponse);
+      return;
+    }
     const userId = (req as any).user?.id || req.body?.userId;
     const { initialInput = {} } = req.body || {};
 
