@@ -59,66 +59,8 @@ export class WorkflowExecutionEngine {
       // Load workflow definition
       const workflow = await this.loadWorkflow(workflowId);
 
-      // Build execution graph
-      const executionOrder = this.buildExecutionOrder(workflow);
-
-      // Execute nodes in order
-      for (const nodeId of executionOrder) {
-        const node = workflow.nodes.find(n => n.id === nodeId);
-        if (!node) continue;
-
-        // Skip TRIGGER nodes - they're just entry points
-        if (node.type === NodeType.TRIGGER) {
-          logger.debug({ nodeId, type: node.type }, 'Skipping trigger node');
-          continue;
-        }
-
-        logger.debug({ nodeId, type: node.type }, 'Executing node');
-
-        // Get input data from previous nodes
-        const inputData = this.collectInputData(node.id, workflow, context);
-
-        // Create node execution record
-        const nodeExecutionId = await this.createNodeExecution(
-          executionId,
-          node.id,
-          node.type,
-          inputData
-        );
-
-        // Execute the node
-        const nodeInput: NodeExecutionInput = {
-          nodeId: node.id,
-          nodeType: node.type,
-          nodeConfig: node.config,
-          inputData,
-          executionContext: context,
-          secrets: await this.loadUserSecrets(userId),
-        };
-
-        const processor = nodeProcessorFactory.getProcessor(node.type);
-        const result = await processor.execute(nodeInput);
-
-        // Update node execution record
-        await this.updateNodeExecution(nodeExecutionId, result);
-
-        // Store output in context
-        context.nodeOutputs.set(node.id, result.output);
-        context.currentNodeId = node.id;
-
-        // Check if node failed
-        if (!result.success) {
-          logger.error({ nodeId, error: result.error }, 'Node execution failed');
-
-          // Check if we should continue or stop
-          if (!(node.config as any).continueOnError) {
-            context.status = ExecutionStatus.FAILED;
-            context.error = result.error;
-            context.completedAt = new Date();
-            break;
-          }
-        }
-      }
+      // Execute workflow with branching support
+      await this.executeWorkflowWithBranching(workflow, context);
 
       // If no errors, mark as success
       if (context.status === ExecutionStatus.RUNNING) {
@@ -215,6 +157,8 @@ export class WorkflowExecutionEngine {
         id: e.id,
         sourceNodeId: e.source_node_id,
         targetNodeId: e.target_node_id,
+        sourceHandle: e.source_handle || undefined,
+        targetHandle: e.target_handle || undefined,
         condition: e.condition,
         dataMapping: e.data_mapping,
       })),
@@ -232,47 +176,153 @@ export class WorkflowExecutionEngine {
   }
 
   /**
-   * Build execution order from workflow graph (topological sort)
+   * Execute workflow with branching support (handles IF nodes)
    */
-  private buildExecutionOrder(workflow: WorkflowDefinition): string[] {
-    const order: string[] = [];
+  private async executeWorkflowWithBranching(
+    workflow: WorkflowDefinition,
+    context: WorkflowExecutionContext
+  ): Promise<void> {
     const visited = new Set<string>();
-    const visiting = new Set<string>();
-
-    const visit = (nodeId: string): void => {
-      if (visited.has(nodeId)) return;
-      if (visiting.has(nodeId)) {
-        throw new Error('Circular dependency detected in workflow');
-      }
-
-      visiting.add(nodeId);
-
-      // Get all incoming edges
-      const incomingEdges = workflow.edges.filter(e => e.targetNodeId === nodeId);
-
-      // Visit dependencies first
-      for (const edge of incomingEdges) {
-        visit(edge.sourceNodeId);
-      }
-
-      visiting.delete(nodeId);
-      visited.add(nodeId);
-      order.push(nodeId);
-    };
+    const branchDecisions = new Map<string, string>();
+    const maxSteps = 100;
+    let stepCount = 0;
 
     // Start from trigger node
-    if (workflow.triggerNodeId) {
-      visit(workflow.triggerNodeId);
+    let currentNodeId: string | null = workflow.triggerNodeId;
+
+    while (currentNodeId && stepCount < maxSteps) {
+      stepCount++;
+
+      // Prevent infinite loops
+      if (visited.has(currentNodeId)) {
+        logger.warn({ nodeId: currentNodeId }, 'Node already visited, breaking loop');
+        break;
+      }
+
+      visited.add(currentNodeId);
+
+      const node = workflow.nodes.find(n => n.id === currentNodeId);
+      if (!node) {
+        logger.error({ nodeId: currentNodeId }, 'Node not found');
+        break;
+      }
+
+      // Skip TRIGGER nodes
+      if (node.type === NodeType.TRIGGER) {
+        logger.debug({ nodeId: currentNodeId }, 'Skipping trigger node');
+        
+        // Move to next node
+        const nextEdges = workflow.edges.filter(e => e.sourceNodeId === currentNodeId);
+        currentNodeId = nextEdges.length > 0 ? nextEdges[0].targetNodeId : null;
+        continue;
+      }
+
+      logger.debug({ nodeId: currentNodeId, type: node.type }, 'Executing node');
+
+      // Get input data from previous nodes
+      const inputData = this.collectInputData(node.id, workflow, context);
+
+      // Create node execution record
+      const nodeExecutionId = await this.createNodeExecution(
+        context.executionId,
+        node.id,
+        node.type,
+        inputData
+      );
+
+      // Execute the node
+      const nodeInput: NodeExecutionInput = {
+        nodeId: node.id,
+        nodeType: node.type,
+        nodeConfig: node.config,
+        inputData,
+        executionContext: context,
+        secrets: await this.loadUserSecrets(context.userId),
+      };
+
+      const processor = nodeProcessorFactory.getProcessor(node.type);
+      const result = await processor.execute(nodeInput);
+
+      // Update node execution record
+      await this.updateNodeExecution(nodeExecutionId, result);
+
+      // Store output in context
+      context.nodeOutputs.set(node.id, result.output);
+      context.currentNodeId = node.id;
+
+      // Handle IF nodes - store branch decision
+      if (node.type === NodeType.IF && result.output?.branchToFollow) {
+        branchDecisions.set(node.id, result.output.branchToFollow);
+        
+        logger.info(
+          {
+            nodeId: node.id,
+            branchChosen: result.output.branchToFollow,
+          },
+          'IF node: branch selected'
+        );
+      }
+
+      // Check if node failed
+      if (!result.success) {
+        logger.error({ nodeId: node.id, error: result.error }, 'Node execution failed');
+
+        if (!(node.config as any).continueOnError) {
+          context.status = ExecutionStatus.FAILED;
+          context.error = result.error;
+          throw new Error(`Node ${node.id} failed: ${result.error?.message}`);
+        }
+      }
+
+      // Get next node based on branching
+      currentNodeId = this.getNextNode(node.id, branchDecisions, workflow);
     }
 
-    // Visit any remaining unvisited nodes
-    for (const node of workflow.nodes) {
-      if (!visited.has(node.id)) {
-        visit(node.id);
+    if (stepCount >= maxSteps) {
+      throw new Error(`Workflow exceeded maximum steps (${maxSteps})`);
+    }
+  }
+
+  /**
+ * Get next node to execute (handles IF node branching)
+ */
+  private getNextNode(
+    currentNodeId: string,
+    branchDecisions: Map<string, string>,
+    workflow: WorkflowDefinition
+  ): string | null {
+    const currentNode = workflow.nodes.find(n => n.id === currentNodeId);
+    
+    // If this is an IF node, follow the chosen branch
+    if (currentNode?.type === NodeType.IF) {
+      const chosenBranch = branchDecisions.get(currentNodeId);
+      
+      if (chosenBranch) {
+        // Find edge with matching sourceHandle
+        const branchEdges = workflow.edges.filter(
+          e => e.sourceNodeId === currentNodeId && e.sourceHandle === chosenBranch
+        );
+        
+        if (branchEdges.length > 0) {
+          return branchEdges[0].targetNodeId;
+        }
+        
+        logger.warn(
+          { nodeId: currentNodeId, branch: chosenBranch },
+          'IF node: no edge found for chosen branch'
+        );
+        return null;
       }
     }
-
-    return order;
+    
+    // For regular nodes, follow the first outgoing edge
+    const outgoingEdges = workflow.edges.filter(e => e.sourceNodeId === currentNodeId);
+    
+    if (outgoingEdges.length > 0) {
+      return outgoingEdges[0].targetNodeId;
+    }
+    
+    return null;
   }
 
   /**
