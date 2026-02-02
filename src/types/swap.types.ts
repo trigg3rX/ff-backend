@@ -25,6 +25,7 @@ export enum NodeType {
   WEBHOOK = 'WEBHOOK',
   DELAY = 'DELAY',
   EMAIL = 'EMAIL',
+  EMAIL = 'EMAIL',
 }
 
 // Trigger Types
@@ -213,7 +214,11 @@ export interface WorkflowEdge {
   id: string;
   sourceNodeId: string;
   targetNodeId: string;
-  
+
+  // Branch identification (for IF nodes)
+  sourceHandle?: string; // 'true' | 'false' | null
+  targetHandle?: string;
+
   // Conditional routing
   condition?: {
     field: string;
@@ -358,6 +363,8 @@ export interface DBWorkflowEdge {
   workflow_id: string;
   source_node_id: string;
   target_node_id: string;
+  source_handle?: string; // For IF node branching
+  target_handle?: string; // For multi-input nodes
   condition?: any; // JSONB
   data_mapping?: any; // JSONB
   created_at: Date;

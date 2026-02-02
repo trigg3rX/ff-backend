@@ -104,13 +104,17 @@ export const createWorkflow = async (
             workflow_id,
             source_node_id,
             target_node_id,
+            source_handle,
+            target_handle,
             condition,
             data_mapping
-          ) VALUES ($1, $2, $3, $4, $5)`,
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
           [
             workflowId,
             realSourceId,
             realTargetId,
+            edge.sourceHandle || null,
+            edge.targetHandle || null,
             edge.condition ? JSON.stringify(edge.condition) : null,
             edge.dataMapping ? JSON.stringify(edge.dataMapping) : null,
           ]

@@ -216,3 +216,4 @@ if (command === "up") {
   logger.info("Usage: node run.js [up|down]");
   process.exit(1);
 }
+

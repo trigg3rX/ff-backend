@@ -88,4 +88,3 @@ export const down = async (pool: Pool): Promise<void> => {
 
     logger.info('Rollback completed: 003_add_slack_oauth_fields');
 };
-
