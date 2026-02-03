@@ -3,6 +3,7 @@ import {
   NodeExecutionInput,
   NodeExecutionOutput,
   OracleNodeConfig,
+  ChainlinkOracleConfig,
   OracleProvider,
   SupportedChain,
   ChainlinkPriceOutput,
@@ -39,9 +40,17 @@ export class OracleNodeProcessor implements INodeProcessor {
         throw new Error(`Invalid oracle configuration: ${validation.errors?.join(', ')}`);
       }
 
+      // Type guard: ensure this is a Chainlink config
+      if (config.provider !== OracleProvider.CHAINLINK) {
+        throw new Error(`Invalid provider for Chainlink oracle: ${config.provider}`);
+      }
+
+      // Now TypeScript knows this is ChainlinkOracleConfig
+      const chainlinkConfig = config as ChainlinkOracleConfig;
+
       // Chainlink read-only calls via shared provider
-      const provider = getProvider(config.chain);
-      const feed = new Contract(config.aggregatorAddress, AGGREGATOR_V3_ABI, provider);
+      const provider = getProvider(chainlinkConfig.chain);
+      const feed = new Contract(chainlinkConfig.aggregatorAddress, AGGREGATOR_V3_ABI, provider);
 
       const [decimals, description, round] = await Promise.all([
         feed.decimals() as Promise<number>,
@@ -59,8 +68,8 @@ export class OracleNodeProcessor implements INodeProcessor {
       const updatedAt = Number(round.updatedAt);
       const nowSeconds = Math.floor(Date.now() / 1000);
 
-      if (config.staleAfterSeconds !== undefined) {
-        const staleAfterSeconds = Number(config.staleAfterSeconds);
+      if (chainlinkConfig.staleAfterSeconds !== undefined) {
+        const staleAfterSeconds = Number(chainlinkConfig.staleAfterSeconds);
         if (!Number.isFinite(staleAfterSeconds) || staleAfterSeconds <= 0) {
           throw new Error('staleAfterSeconds must be a positive number when provided');
         }
@@ -78,8 +87,8 @@ export class OracleNodeProcessor implements INodeProcessor {
 
       const output: ChainlinkPriceOutput = {
         provider: OracleProvider.CHAINLINK,
-        chain: config.chain,
-        aggregatorAddress: config.aggregatorAddress,
+        chain: chainlinkConfig.chain,
+        aggregatorAddress: chainlinkConfig.aggregatorAddress,
         description,
         decimals,
         roundId: round.roundId.toString(),
@@ -93,15 +102,15 @@ export class OracleNodeProcessor implements INodeProcessor {
       const endTime = new Date();
 
       let finalOutput: any = output;
-      if (config.outputMapping) {
-        finalOutput = this.applyOutputMapping(output, config.outputMapping);
+      if (chainlinkConfig.outputMapping) {
+        finalOutput = this.applyOutputMapping(output, chainlinkConfig.outputMapping);
       }
 
       logger.info(
         {
           nodeId: input.nodeId,
-          chain: config.chain,
-          aggregatorAddress: config.aggregatorAddress,
+          chain: chainlinkConfig.chain,
+          aggregatorAddress: chainlinkConfig.aggregatorAddress,
           updatedAt,
         },
         'Price oracle node executed successfully'
@@ -156,10 +165,15 @@ export class OracleNodeProcessor implements INodeProcessor {
       errors.push('Invalid or missing chain');
     }
 
-    if (!oracleConfig.aggregatorAddress || typeof oracleConfig.aggregatorAddress !== 'string') {
-      errors.push('aggregatorAddress is required');
-    } else if (!isAddress(oracleConfig.aggregatorAddress)) {
-      errors.push('aggregatorAddress must be a valid EVM address');
+    // Type guard for Chainlink-specific validation
+    if (oracleConfig.provider === OracleProvider.CHAINLINK) {
+      const chainlinkConfig = oracleConfig as ChainlinkOracleConfig;
+      
+      if (!chainlinkConfig.aggregatorAddress || typeof chainlinkConfig.aggregatorAddress !== 'string') {
+        errors.push('aggregatorAddress is required');
+      } else if (!isAddress(chainlinkConfig.aggregatorAddress)) {
+        errors.push('aggregatorAddress must be a valid EVM address');
+      }
     }
 
     return { valid: errors.length === 0, errors: errors.length ? errors : undefined };
