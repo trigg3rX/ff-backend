@@ -76,6 +76,35 @@ export class SafeRelayValidationService {
   }
 
   /**
+ * Get current nonce from Safe contract
+ */
+  async getSafeNonce(
+    safeAddress: string,
+    chainId: SupportedChainId
+  ): Promise<number> {
+    const relayerService = getRelayerService();
+    const provider = relayerService.getProvider(chainId);
+
+    const SAFE_ABI = ["function nonce() view returns (uint256)"];
+
+    const safeContract = new ethers.Contract(safeAddress, SAFE_ABI, provider);
+
+    try {
+      const nonce = await safeContract.nonce();
+      return Number(nonce);
+    } catch (error) {
+      logger.error(
+        {
+          error,
+          safeAddress,
+        },
+        "Failed to read Safe nonce"
+      );
+      throw new Error("Failed to read Safe nonce");
+    }
+  }
+  
+  /**
    * Validate that the Safe transaction is exactly "enableModule(address)"
    */
   validateEnableModuleCalldata(
@@ -160,8 +189,49 @@ export class SafeRelayValidationService {
         "Safe info retrieved"
       );
 
-      // Compute Safe transaction hash manually (EIP-712)
+      // Handle nonce - prefer client-provided but fall back to fetching if not provided
+      let nonce: number;
+      const currentNonce = await this.getSafeNonce(safeAddress, chainId);
 
+      if (safeTxData.nonce === undefined || safeTxData.nonce === null) {
+        logger.warn(
+          { safeAddress, chainId },
+          "Nonce not provided in safeTxData - fetching from chain (less secure)"
+        );
+        nonce = currentNonce;
+      } else {
+        // Validate provided nonce matches on-chain (with type coercion)
+        const providedNonce = Number(safeTxData.nonce);
+
+        if (isNaN(providedNonce)) {
+          logger.warn({ safeAddress, chainId, rawNonce: safeTxData.nonce }, "Invalid nonce format");
+          return {
+            isValid: false,
+            error: "Invalid nonce format",
+          };
+        }
+
+        if (providedNonce !== currentNonce) {
+          logger.warn(
+            {
+              safeAddress,
+              chainId,
+              providedNonce,
+              expectedNonce: currentNonce,
+            },
+            "Nonce mismatch - possible stale transaction or replay attempt"
+          );
+          return {
+            isValid: false,
+            error: `Nonce mismatch: expected ${currentNonce}, got ${providedNonce}. Please refresh and sign again.`,
+          };
+        }
+
+        nonce = providedNonce;
+        logger.info({ safeAddress, chainId, nonce }, "Nonce validated successfully");
+      }
+
+      // Compute Safe transaction hash manually (EIP-712)
       const domain = {
         chainId: BigInt(chainId),
         verifyingContract: safeAddress,
@@ -192,7 +262,7 @@ export class SafeRelayValidationService {
         gasPrice: BigInt(safeTxData.gasPrice),
         gasToken: safeTxData.gasToken,
         refundReceiver: safeTxData.refundReceiver,
-        nonce: BigInt(safeTxData.nonce),
+        nonce: BigInt(nonce),
       };
 
       // Compute EIP-712 hash
@@ -251,19 +321,21 @@ export class SafeRelayValidationService {
 
       return { isValid: true };
     } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      const errorStack = error instanceof Error ? error.stack : undefined;
+
       logger.error(
         {
-          error,
+          error: errorMessage,
+          errorStack,
           safeAddress,
+          chainId,
         },
         "Failed to verify Safe signatures"
       );
       return {
         isValid: false,
-        error:
-          error instanceof Error
-            ? error.message
-            : "Signature verification failed",
+        error: errorMessage || "Signature verification failed",
       };
     }
   }
