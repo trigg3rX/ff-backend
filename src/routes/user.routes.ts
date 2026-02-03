@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import { UserController } from '../controllers/user.controller';
 import { validateBody, validateParams, asyncHandler } from '../middleware';
+import { verifyPrivyToken } from '../middleware/privy-auth';
 import { createUserSchema, userIdSchema } from '../models/users';
 
 const router = Router();
@@ -22,6 +23,14 @@ router.post(
  * @access  Public
  */
 router.get('/', asyncHandler(UserController.getAllUsers));
+
+/**
+ * @route   GET /api/v1/users/me
+ * @desc    Get current authenticated user
+ * @access  Private (requires Privy token)
+ * @important Must be defined BEFORE /:id route to avoid matching "me" as an ID
+ */
+router.get('/me', verifyPrivyToken, asyncHandler(UserController.getMe));
 
 /**
  * @route   GET /api/v1/users/:id

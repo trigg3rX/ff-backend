@@ -186,6 +186,38 @@ export class UserController {
     }
   }
 
+  /**
+   * Get current authenticated user (via Privy token)
+   * This is safer than GET /users/address/:address as it uses authenticated userId
+   */
+  static async getMe(req: Request, res: Response): Promise<void> {
+    try {
+      // This requires AuthenticatedRequest from privy-auth middleware
+      const userId = (req as any).userId;
+
+      if (!userId) {
+        throw new AppError(401, 'Not authenticated', 'NOT_AUTHENTICATED');
+      }
+
+      const user = await UserModel.findById(userId);
+
+      if (!user) {
+        throw new AppError(404, 'User not found', 'USER_NOT_FOUND');
+      }
+
+      const response: ApiResponse = {
+        success: true,
+        data: user,
+        meta: {
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      res.status(200).json(response);
+    } catch (error) {
+      throw error;
+    }
+  }
 
   /**
    * Delete a user

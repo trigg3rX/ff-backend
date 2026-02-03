@@ -7,6 +7,7 @@ import emailRoutes from './integrations/email.routes';
 import workflowRoutes from './workflow.routes';
 import swapRoutes from './swap.routes';
 import lendingRoutes from './lending.routes';
+import metaRoutes from './meta.routes';
 import { pool } from '../config/database';
 import { redisClient } from '../config/redis';
 import { logger } from '../utils/logger';
@@ -124,6 +125,6 @@ router.use('/integrations/email', emailRoutes);
 router.use('/workflows', workflowRoutes);
 router.use('/swaps', swapRoutes);
 router.use('/lending', lendingRoutes);
+router.use('/meta', metaRoutes);
 
 export default router;
-
