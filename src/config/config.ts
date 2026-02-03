@@ -171,6 +171,17 @@ export function isSupportedChain(chainId: number): chainId is SupportedChainId {
 }
 
 /**
+ * Get list of all supported chains
+ */
+export function getActiveChains(): SupportedChainId[] {
+  return [
+    SUPPORTED_CHAINS.ETHEREUM_SEPOLIA,
+    SUPPORTED_CHAINS.ARBITRUM_SEPOLIA,
+    SUPPORTED_CHAINS.ARBITRUM_MAINNET,
+  ];
+}
+
+/**
  * Safe Contract Addresses (deprecated - use chainConfigs instead)
  * @deprecated Use chainConfigs[chainId] instead
  */

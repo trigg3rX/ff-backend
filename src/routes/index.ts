@@ -8,6 +8,8 @@ import workflowRoutes from './workflow.routes';
 import swapRoutes from './swap.routes';
 import lendingRoutes from './lending.routes';
 import metaRoutes from './meta.routes';
+import oracleRoutes from './oracle.routes';
+
 import { pool } from '../config/database';
 import { redisClient } from '../config/redis';
 import { logger } from '../utils/logger';
@@ -126,5 +128,6 @@ router.use('/workflows', workflowRoutes);
 router.use('/swaps', swapRoutes);
 router.use('/lending', lendingRoutes);
 router.use('/meta', metaRoutes);
+router.use('/oracle', oracleRoutes);
 
 export default router;

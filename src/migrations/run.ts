@@ -164,7 +164,7 @@ const migrations: Migration[] = [
   },
   {
     id: 21,
-    name: "021_create_flowforge_workflows_table",
+    name: "021_add_aave_compound_node_types",
     up: migration021.up,
     down: migration021.down,
   },

@@ -92,15 +92,33 @@ export class WorkflowExecutionEngine {
       // Update workflow last executed timestamp
       await this.updateWorkflowLastExecuted(workflowId);
 
+      // Collect oracle results for summary
+      const oracleResults: string[] = [];
+      context.nodeOutputs.forEach((output: any) => {
+        if (output && (output.provider === 'CHAINLINK' || output.provider === 'PYTH')) {
+          if (output.provider === 'CHAINLINK') {
+            oracleResults.push(`${output.description || 'Price'}: $${output.formattedAnswer}`);
+          } else {
+            oracleResults.push(`Price: $${output.formattedPrice}`);
+          }
+        }
+      });
+
+      const duration = context.completedAt
+        ? context.completedAt.getTime() - context.startedAt.getTime()
+        : null;
+
       logger.info(
         {
           executionId,
           status: context.status,
-          duration: context.completedAt
-            ? context.completedAt.getTime() - context.startedAt.getTime()
-            : null,
+          duration,
+          nodesExecuted: context.nodeOutputs.size,
+          ...(oracleResults.length > 0 && { oraclePrices: oracleResults }),
         },
-        'Workflow execution completed'
+        context.status === ExecutionStatus.SUCCESS
+          ? `✅ Workflow execution completed successfully in ${duration}ms${oracleResults.length > 0 ? ' | ' + oracleResults.join(' | ') : ''}`
+          : 'Workflow execution completed'
       );
 
       // Emit execution completed event

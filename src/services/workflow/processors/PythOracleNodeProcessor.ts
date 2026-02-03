@@ -116,14 +116,17 @@ export class PythOracleNodeProcessor implements INodeProcessor {
         finalOutput = this.applyOutputMapping(output, config.outputMapping);
       }
 
+      // Log the price clearly
       logger.info(
         {
           nodeId: input.nodeId,
           chain: config.chain,
           priceFeedId: config.priceFeedId,
-          publishTime,
+          price: output.formattedPrice,
+          confidence: formatUnits(priceData.conf, Math.abs(exponent)),
+          publishTime: new Date(publishTime * 1000).toISOString(),
         },
-        'Pyth price oracle node executed successfully'
+        ` Pyth Price Oracle: Price = $${output.formattedPrice} (±$${formatUnits(priceData.conf, Math.abs(exponent))})`
       );
 
       return {

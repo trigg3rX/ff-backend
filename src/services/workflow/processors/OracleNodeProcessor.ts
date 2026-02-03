@@ -106,14 +106,18 @@ export class OracleNodeProcessor implements INodeProcessor {
         finalOutput = this.applyOutputMapping(output, chainlinkConfig.outputMapping);
       }
 
+      // Log the price clearly
       logger.info(
         {
           nodeId: input.nodeId,
           chain: chainlinkConfig.chain,
           aggregatorAddress: chainlinkConfig.aggregatorAddress,
-          updatedAt,
+          description: output.description,
+          price: output.formattedAnswer,
+          decimals: output.decimals,
+          updatedAt: new Date(updatedAt * 1000).toISOString(),
         },
-        'Price oracle node executed successfully'
+        ` Chainlink Price Oracle: ${output.description || 'Price Feed'} = $${output.formattedAnswer}`
       );
 
       return {
