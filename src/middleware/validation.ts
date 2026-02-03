@@ -34,7 +34,15 @@ export const validateBody = (schema: Joi.ObjectSchema) => {
       return;
     }
 
-    req.body = value;
+    try {
+      req.body = value;
+    } catch (_e) {
+      // Fallback for when req.body is read-only
+      if (req.body && typeof req.body === 'object') {
+        Object.keys(req.body).forEach(key => delete req.body[key]);
+        Object.assign(req.body, value);
+      }
+    }
     next();
   };
 };
@@ -71,7 +79,15 @@ export const validateParams = (schema: Joi.ObjectSchema) => {
       return;
     }
 
-    req.params = value;
+    try {
+      req.params = value;
+    } catch (_e) {
+      // Fallback for when req.params is read-only
+      if (req.params && typeof req.params === 'object') {
+        Object.keys(req.params).forEach(key => delete (req.params as any)[key]);
+        Object.assign(req.params, value);
+      }
+    }
     next();
   };
 };
@@ -108,7 +124,15 @@ export const validateQuery = (schema: Joi.ObjectSchema) => {
       return;
     }
 
-    req.query = value;
+    try {
+      req.query = value;
+    } catch (_e) {
+      // Fallback for when req.query is read-only
+      if (req.query && typeof req.query === 'object') {
+        Object.keys(req.query).forEach(key => delete (req.query as any)[key]);
+        Object.assign(req.query, value);
+      }
+    }
     next();
   };
 };

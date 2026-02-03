@@ -127,6 +127,27 @@ export const listWorkflowsQuerySchema = Joi.object({
     offset: Joi.number().integer().min(0).default(0),
 });
 
+/**
+ * Schema for full update workflow (including nodes and edges)
+ */
+export const fullUpdateWorkflowSchema = Joi.object({
+    name: Joi.string().max(VALIDATION_CONSTANTS.MAX_WORKFLOW_NAME_LENGTH),
+    description: Joi.string().max(VALIDATION_CONSTANTS.MAX_WORKFLOW_DESCRIPTION_LENGTH).allow(''),
+    nodes: Joi.array()
+        .items(workflowNodeSchema)
+        .min(VALIDATION_CONSTANTS.MIN_NODES_PER_WORKFLOW)
+        .max(VALIDATION_CONSTANTS.MAX_NODES_PER_WORKFLOW)
+        .required(),
+    edges: Joi.array()
+        .items(workflowEdgeSchema)
+        .default([]),
+    triggerNodeId: Joi.string().allow(null),
+    category: Joi.string().max(50),
+    tags: Joi.array()
+        .items(Joi.string().max(VALIDATION_CONSTANTS.MAX_TAG_LENGTH))
+        .max(VALIDATION_CONSTANTS.MAX_TAGS_PER_WORKFLOW),
+});
+
 // ===========================================
 // USER SCHEMAS
 // ===========================================

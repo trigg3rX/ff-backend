@@ -4,6 +4,7 @@ import {
   getWorkflow,
   listWorkflows,
   updateWorkflow,
+  fullUpdateWorkflow,
   deleteWorkflow,
   executeWorkflow,
   getExecutionStatus,
@@ -20,6 +21,7 @@ import {
   executeWorkflowSchema,
   listWorkflowsQuerySchema,
   idParamSchema,
+  fullUpdateWorkflowSchema,
 } from '../middleware/schemas';
 
 const router = Router();
@@ -27,8 +29,15 @@ const router = Router();
 // Real-time execution updates via Server-Sent Events
 // Security: Token-based authentication is used instead of Authorization header
 router.get('/executions/:executionId/subscribe', async (req: Request, res: Response) => {
-  const { executionId } = req.params;
+  const executionId = typeof req.params.executionId === 'string'
+    ? req.params.executionId
+    : req.params.executionId?.[0];
   const token = req.query.token as string | undefined;
+
+  if (!executionId) {
+    res.status(400).json({ success: false, error: 'Missing executionId' });
+    return;
+  }
 
   // Verify the subscription token
   const verification = await verifySubscriptionToken(executionId, token);
@@ -61,6 +70,7 @@ router.post('/', validateBody(createWorkflowSchema), createWorkflow);
 router.get('/', validateQuery(listWorkflowsQuerySchema), listWorkflows);
 router.get('/:id', validateParams(idParamSchema), getWorkflow);
 router.put('/:id', validateParams(idParamSchema), validateBody(updateWorkflowSchema), updateWorkflow);
+router.put('/:id/full', validateParams(idParamSchema), validateBody(fullUpdateWorkflowSchema), fullUpdateWorkflow);
 router.delete('/:id', validateParams(idParamSchema), deleteWorkflow);
 
 // Workflow Execution with validation

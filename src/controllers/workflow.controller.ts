@@ -300,7 +300,7 @@ export const getWorkflow = async (
 };
 
 /**
- * List all workflows for a user
+ * List all workflows for a user with execution statistics
  */
 export const listWorkflows = async (
   req: Request,
@@ -312,34 +312,81 @@ export const listWorkflows = async (
     const userId = authReq.userId;
     const { category, isActive, limit = 50, offset = 0 } = req.query;
 
-    let query = 'SELECT * FROM workflows WHERE user_id = $1';
+    // Build the base query with execution statistics
+    let query = `
+      SELECT 
+        w.*,
+        COALESCE(exec_stats.execution_count, 0)::int as execution_count,
+        exec_stats.last_execution_status,
+        exec_stats.last_execution_at,
+        COALESCE(exec_stats.success_count, 0)::int as success_count,
+        COALESCE(exec_stats.failed_count, 0)::int as failed_count
+      FROM workflows w
+      LEFT JOIN (
+        SELECT 
+          workflow_id,
+          COUNT(*)::int as execution_count,
+          COUNT(*) FILTER (WHERE status = 'SUCCESS')::int as success_count,
+          COUNT(*) FILTER (WHERE status = 'FAILED')::int as failed_count,
+          (
+            SELECT status FROM workflow_executions we2 
+            WHERE we2.workflow_id = workflow_executions.workflow_id 
+            ORDER BY started_at DESC LIMIT 1
+          ) as last_execution_status,
+          MAX(started_at) as last_execution_at
+        FROM workflow_executions
+        GROUP BY workflow_id
+      ) exec_stats ON w.id = exec_stats.workflow_id
+      WHERE w.user_id = $1
+    `;
     const params: any[] = [userId];
     let paramIndex = 2;
 
     if (category) {
-      query += ` AND category = $${paramIndex}`;
+      query += ` AND w.category = $${paramIndex}`;
       params.push(category);
       paramIndex++;
     }
 
     if (isActive !== undefined) {
-      query += ` AND is_active = $${paramIndex}`;
+      query += ` AND w.is_active = $${paramIndex}`;
       params.push(isActive === 'true');
       paramIndex++;
     }
 
-    query += ' ORDER BY updated_at DESC';
+    query += ' ORDER BY w.updated_at DESC';
     query += ` LIMIT $${paramIndex} OFFSET $${paramIndex + 1}`;
     params.push(limit, offset);
 
     const result = await pool.query(query, params);
+
+    // Get total count for pagination (with same filters)
+    let countQuery = `SELECT COUNT(*) FROM workflows w WHERE w.user_id = $1`;
+    const countParams: any[] = [userId];
+    let countParamIndex = 2;
+
+    if (category) {
+      countQuery += ` AND w.category = $${countParamIndex}`;
+      countParams.push(category);
+      countParamIndex++;
+    }
+
+    if (isActive !== undefined) {
+      countQuery += ` AND w.is_active = $${countParamIndex}`;
+      countParams.push(isActive === 'true');
+    }
+
+    const countResult = await pool.query(countQuery, countParams);
+    const totalCount = parseInt(countResult.rows[0].count, 10);
 
     const response: ApiResponse = {
       success: true,
       data: result.rows,
       meta: {
         timestamp: new Date().toISOString(),
-        total: result.rows.length,
+        total: totalCount,
+        limit: Number(limit),
+        offset: Number(offset),
       },
     };
 
@@ -433,6 +480,190 @@ export const updateWorkflow = async (
 
     res.json(response);
   } catch (error) {
+    next(error);
+  }
+};
+
+/**
+ * Full update workflow - replaces all nodes and edges
+ * Used when saving workflow from the canvas
+ */
+export const fullUpdateWorkflow = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.userId;
+    const {
+      name,
+      description,
+      nodes,
+      edges,
+      triggerNodeId,
+      category,
+      tags,
+    } = req.body;
+
+    logger.info({ workflowId: id, userId, nodeCount: nodes?.length, edgeCount: edges?.length }, 'Full update workflow requested');
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Check if workflow exists and belongs to user
+      const workflowCheck = await client.query(
+        'SELECT id FROM workflows WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (workflowCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({
+          success: false,
+          error: {
+            message: 'Workflow not found',
+            code: 'WORKFLOW_NOT_FOUND',
+          },
+        } as ApiResponse);
+        return;
+      }
+
+      // Update workflow metadata
+      const workflowResult = await client.query(
+        `UPDATE workflows SET 
+          name = COALESCE($1, name),
+          description = COALESCE($2, description),
+          category = COALESCE($3, category),
+          tags = COALESCE($4, tags),
+          updated_at = NOW()
+        WHERE id = $5 AND user_id = $6
+        RETURNING *`,
+        [name, description, category, tags, id, userId]
+      );
+
+      const workflow = workflowResult.rows[0];
+
+      // Delete existing edges first (due to foreign key constraints)
+      await client.query('DELETE FROM workflow_edges WHERE workflow_id = $1', [id]);
+
+      // Delete existing nodes
+      await client.query('DELETE FROM workflow_nodes WHERE workflow_id = $1', [id]);
+
+      // Create new nodes
+      const nodeIds = new Map<string, string>(); // temp ID -> real ID
+
+      if (nodes && Array.isArray(nodes)) {
+        for (const node of nodes) {
+          const nodeResult = await client.query(
+            `INSERT INTO workflow_nodes (
+              workflow_id,
+              type,
+              name,
+              description,
+              config,
+              position,
+              metadata
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+            RETURNING id`,
+            [
+              id,
+              node.type,
+              node.name,
+              node.description,
+              JSON.stringify(node.config || {}),
+              JSON.stringify(node.position || { x: 0, y: 0 }),
+              JSON.stringify(node.metadata || {}),
+            ]
+          );
+
+          nodeIds.set(node.id, nodeResult.rows[0].id);
+        }
+      }
+
+      // Update trigger node ID
+      if (triggerNodeId) {
+        const realTriggerNodeId = nodeIds.get(triggerNodeId);
+        await client.query(
+          'UPDATE workflows SET trigger_node_id = $1 WHERE id = $2',
+          [realTriggerNodeId, id]
+        );
+      }
+
+      // Create new edges
+      if (edges && Array.isArray(edges)) {
+        for (const edge of edges) {
+          const realSourceId = nodeIds.get(edge.sourceNodeId);
+          const realTargetId = nodeIds.get(edge.targetNodeId);
+
+          if (!realSourceId || !realTargetId) {
+            logger.warn({ edge }, 'Skipping edge with missing node reference');
+            continue;
+          }
+
+          await client.query(
+            `INSERT INTO workflow_edges (
+              workflow_id,
+              source_node_id,
+              target_node_id,
+              source_handle,
+              target_handle,
+              condition,
+              data_mapping
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              id,
+              realSourceId,
+              realTargetId,
+              edge.sourceHandle || null,
+              edge.targetHandle || null,
+              edge.condition ? JSON.stringify(edge.condition) : null,
+              edge.dataMapping ? JSON.stringify(edge.dataMapping) : null,
+            ]
+          );
+        }
+      }
+
+      await client.query('COMMIT');
+
+      // Fetch the updated workflow with nodes and edges
+      const nodesResult = await pool.query(
+        'SELECT * FROM workflow_nodes WHERE workflow_id = $1',
+        [id]
+      );
+
+      const edgesResult = await pool.query(
+        'SELECT * FROM workflow_edges WHERE workflow_id = $1',
+        [id]
+      );
+
+      logger.info({ workflowId: id }, 'Workflow fully updated successfully');
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          ...workflow,
+          nodes: nodesResult.rows,
+          edges: edgesResult.rows,
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      res.json(response);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error({ error, workflowId: id, userId }, 'Error in full update workflow transaction');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    logger.error({ error }, 'Error in fullUpdateWorkflow');
     next(error);
   }
 };
