@@ -16,7 +16,6 @@ import crypto from 'crypto';
 export interface LlmTransformNodeConfig {
   provider: 'openai' | 'openrouter';
   model: string;
-  systemPrompt?: string;
   userPromptTemplate: string; // Supports {{path}} templating
   outputSchema?: Record<string, any>;
   temperature?: number;
@@ -49,7 +48,7 @@ export class LlmTransformNodeProcessor implements INodeProcessor {
       }
 
       // Build messages array
-      const messages: Array<{ role: 'system' | 'user' | 'assistant'; content: string }> = [];
+      const messages: Array<{ role: 'user' | 'assistant'; content: string }> = [];
 
       // Log input data for debugging
       logger.debug(
@@ -60,15 +59,6 @@ export class LlmTransformNodeProcessor implements INodeProcessor {
         },
         'LLM Transform input data'
       );
-
-      // Add system prompt if provided (also template it)
-      if (config.systemPrompt) {
-        const templatedSystemPrompt = templateString(config.systemPrompt, input.inputData);
-        messages.push({
-          role: 'system',
-          content: templatedSystemPrompt,
-        });
-      }
 
       // Template the user prompt with input data
       const userPrompt = templateString(config.userPromptTemplate, input.inputData);
@@ -204,11 +194,6 @@ export class LlmTransformNodeProcessor implements INodeProcessor {
       errors.push('User prompt template is required and must be a string');
     } else if (config.userPromptTemplate.trim().length === 0) {
       errors.push('User prompt template cannot be empty');
-    }
-
-    // Validate system prompt if provided
-    if (config.systemPrompt !== undefined && typeof config.systemPrompt !== 'string') {
-      errors.push('System prompt must be a string');
     }
 
     // Validate temperature if provided

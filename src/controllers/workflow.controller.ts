@@ -39,7 +39,6 @@ function translateNodeConfigPlaceholders(
   // Fields that may contain template placeholders
   const templateFields = [
     'userPromptTemplate',
-    'systemPrompt',
     'message',
     'body',
     'subject',
