@@ -23,6 +23,7 @@ import * as migration019 from "./019_create_lending_executions_table";
 import * as migration020 from "./020_add_lending_node_type";
 import * as migration021 from "./021_add_aave_compound_node_types";
 import * as migration022 from "./022_add_llm_transform_node_type";
+import * as migration023 from "./023_add_workflow_visibility_fields";
 
 // Load environment variables
 dotenv.config();
@@ -123,6 +124,7 @@ const resetDatabase = async (): Promise<void> => {
     await migration020.up(pool);
     await migration021.up(pool);
     await migration022.up(pool);
+    await migration023.up(pool);
 
     // Record migrations
     await pool.query(`
@@ -219,6 +221,10 @@ const resetDatabase = async (): Promise<void> => {
     await pool.query(
       "INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
       [22, "022_add_llm_transform_node_type"]
+    );
+    await pool.query(
+      "INSERT INTO migrations (id, name) VALUES ($1, $2) ON CONFLICT (id) DO NOTHING",
+      [23, "023_add_workflow_visibility_fields"]
     );
     logger.info("Database reset completed successfully");
   } catch (error) {
