@@ -21,6 +21,11 @@ export const idParamSchema = Joi.object({
     id: uuidSchema.required(),
 });
 
+export const idWithVersionParamSchema = Joi.object({
+    id: uuidSchema.required(),
+    versionNumber: Joi.number().integer().min(1).required(),
+});
+
 // ===========================================
 // WORKFLOW SCHEMAS
 // ===========================================

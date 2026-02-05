@@ -12,6 +12,9 @@ import {
   listPublicWorkflows,
   getPublicWorkflow,
   clonePublicWorkflow,
+  getWorkflowVersions,
+  getWorkflowVersion,
+  restoreWorkflowVersion,
 } from '../controllers/workflow.controller';
 import { subscribeToExecution } from '../services/ExecutionSSEService';
 import { verifyPrivyToken } from '../middleware/privy-auth';
@@ -24,9 +27,11 @@ import {
   executeWorkflowSchema,
   listWorkflowsQuerySchema,
   idParamSchema,
+  idWithVersionParamSchema,
   fullUpdateWorkflowSchema,
   listPublicWorkflowsQuerySchema,
 } from '../middleware/schemas';
+
 
 const router = Router();
 
@@ -86,6 +91,11 @@ router.get('/:id', validateParams(idParamSchema), getWorkflow);
 router.put('/:id', validateParams(idParamSchema), validateBody(updateWorkflowSchema), updateWorkflow);
 router.put('/:id/full', validateParams(idParamSchema), validateBody(fullUpdateWorkflowSchema), fullUpdateWorkflow);
 router.delete('/:id', validateParams(idParamSchema), deleteWorkflow);
+
+// Workflow Version History
+router.get('/:id/versions', validateParams(idParamSchema), getWorkflowVersions);
+router.get('/:id/versions/:versionNumber', validateParams(idWithVersionParamSchema), getWorkflowVersion);
+router.post('/:id/versions/:versionNumber/restore', validateParams(idWithVersionParamSchema), restoreWorkflowVersion);
 
 // Workflow Execution with validation
 router.post('/:id/execute', validateParams(idParamSchema), validateBody(executeWorkflowSchema), executeWorkflow);

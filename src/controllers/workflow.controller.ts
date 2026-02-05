@@ -39,7 +39,6 @@ function translateNodeConfigPlaceholders(
   // Fields that may contain template placeholders
   const templateFields = [
     'userPromptTemplate',
-    'systemPrompt',
     'message',
     'body',
     'subject',
@@ -512,7 +511,7 @@ export const updateWorkflow = async (
       fields.push(`is_public = $${paramIndex}`);
       values.push(isPublic);
       paramIndex++;
-      
+
       // Set or clear published_at based on isPublic
       if (isPublic) {
         fields.push(`published_at = COALESCE(published_at, NOW())`);
@@ -586,9 +585,9 @@ export const fullUpdateWorkflow = async (
     try {
       await client.query('BEGIN');
 
-      // Check if workflow exists and belongs to user
+      // Check if workflow exists and belongs to user, get current version
       const workflowCheck = await client.query(
-        'SELECT id FROM workflows WHERE id = $1 AND user_id = $2',
+        'SELECT id, version, name, description, category, tags, is_public FROM workflows WHERE id = $1 AND user_id = $2',
         [id, userId]
       );
 
@@ -604,10 +603,55 @@ export const fullUpdateWorkflow = async (
         return;
       }
 
+      const currentWorkflow = workflowCheck.rows[0];
+      const currentVersion = currentWorkflow.version || 1;
+      const newVersion = currentVersion + 1;
+
+      // Get current nodes and edges for version snapshot
+      const currentNodesResult = await client.query(
+        'SELECT * FROM workflow_nodes WHERE workflow_id = $1',
+        [id]
+      );
+      const currentEdgesResult = await client.query(
+        'SELECT * FROM workflow_edges WHERE workflow_id = $1',
+        [id]
+      );
+
+      // Save current state to version history (before updating)
+      await client.query(
+        `INSERT INTO workflow_version_history (
+          workflow_id, 
+          version_number, 
+          change_summary,
+          nodes_snapshot, 
+          edges_snapshot,
+          workflow_metadata,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (workflow_id, version_number) DO NOTHING`,
+        [
+          id,
+          currentVersion,
+          `Version ${currentVersion}`,
+          JSON.stringify(currentNodesResult.rows),
+          JSON.stringify(currentEdgesResult.rows),
+          JSON.stringify({
+            name: currentWorkflow.name,
+            description: currentWorkflow.description,
+            category: currentWorkflow.category,
+            tags: currentWorkflow.tags,
+            is_public: currentWorkflow.is_public,
+          }),
+          userId,
+        ]
+      );
+
+      logger.info({ workflowId: id, currentVersion, newVersion }, 'Saving version snapshot before update');
+
       // Update workflow metadata
       let publishedAtClause = '';
       const updateParams: any[] = [name, description, category, tags];
-      
+
       if (isPublic !== undefined) {
         if (isPublic) {
           // When publishing, set published_at if not already set
@@ -619,16 +663,18 @@ export const fullUpdateWorkflow = async (
           updateParams.push(isPublic);
         }
       }
-      
+
       updateParams.push(id, userId);
       const paramCount = updateParams.length;
-      
+
       const workflowResult = await client.query(
         `UPDATE workflows SET 
           name = COALESCE($1, name),
           description = COALESCE($2, description),
           category = COALESCE($3, category),
           tags = COALESCE($4, tags),
+          version = version + 1,
+          version_created_at = NOW(),
           updated_at = NOW()
           ${publishedAtClause}
         WHERE id = $${paramCount - 1} AND user_id = $${paramCount}
@@ -849,7 +895,10 @@ export const executeWorkflow = async (
       return;
     }
 
-    // Enqueue execution
+    const workflow = workflowResult.rows[0];
+    const versionNumber = workflow.version || 1;
+
+    // Enqueue execution with version number
     const executionId = crypto.randomUUID();
     await enqueueWorkflowExecution({
       workflowId: id,
@@ -857,6 +906,7 @@ export const executeWorkflow = async (
       triggeredBy: TriggerType.MANUAL,
       initialInput,
       executionId,
+      versionNumber,
     });
 
     // Generate subscription token for SSE access
@@ -1359,6 +1409,361 @@ export const clonePublicWorkflow = async (
     }
   } catch (error) {
     logger.error({ error }, 'Error in clonePublicWorkflow');
+    next(error);
+  }
+};
+
+/**
+ * Get workflow version history
+ */
+export const getWorkflowVersions = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id } = req.params;
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.userId;
+
+    // Verify workflow exists and belongs to user
+    const workflowCheck = await pool.query(
+      'SELECT id, version FROM workflows WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+
+    if (workflowCheck.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          message: 'Workflow not found',
+          code: 'WORKFLOW_NOT_FOUND',
+        },
+      } as ApiResponse);
+      return;
+    }
+
+    const currentVersion = workflowCheck.rows[0].version || 1;
+
+    // Get version history
+    const versionsResult = await pool.query(
+      `SELECT 
+        id,
+        version_number,
+        change_summary,
+        created_at,
+        created_by
+      FROM workflow_version_history 
+      WHERE workflow_id = $1 
+      ORDER BY version_number DESC`,
+      [id]
+    );
+
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        currentVersion,
+        versions: versionsResult.rows,
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+        total: versionsResult.rows.length,
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error({ error }, 'Error in getWorkflowVersions');
+    next(error);
+  }
+};
+
+/**
+ * Get specific workflow version
+ */
+export const getWorkflowVersion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id, versionNumber } = req.params;
+    const versionStr = Array.isArray(versionNumber) ? versionNumber[0] : versionNumber;
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.userId;
+
+    // Verify workflow exists and belongs to user
+    const workflowCheck = await pool.query(
+      'SELECT id FROM workflows WHERE id = $1 AND user_id = $2',
+      [id, userId]
+    );
+
+    if (workflowCheck.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          message: 'Workflow not found',
+          code: 'WORKFLOW_NOT_FOUND',
+        },
+      } as ApiResponse);
+      return;
+    }
+
+    // Get specific version
+    const versionResult = await pool.query(
+      `SELECT * FROM workflow_version_history 
+       WHERE workflow_id = $1 AND version_number = $2`,
+      [id, parseInt(versionStr, 10)]
+    );
+
+    if (versionResult.rows.length === 0) {
+      res.status(404).json({
+        success: false,
+        error: {
+          message: 'Version not found',
+          code: 'VERSION_NOT_FOUND',
+        },
+      } as ApiResponse);
+      return;
+    }
+
+    const version = versionResult.rows[0];
+
+    const response: ApiResponse = {
+      success: true,
+      data: {
+        id: version.id,
+        workflowId: id,
+        versionNumber: version.version_number,
+        changeSummary: version.change_summary,
+        nodes: version.nodes_snapshot,
+        edges: version.edges_snapshot,
+        metadata: version.workflow_metadata,
+        createdAt: version.created_at,
+        createdBy: version.created_by,
+      },
+      meta: {
+        timestamp: new Date().toISOString(),
+      },
+    };
+
+    res.json(response);
+  } catch (error) {
+    logger.error({ error }, 'Error in getWorkflowVersion');
+    next(error);
+  }
+};
+
+/**
+ * Restore workflow to a previous version
+ */
+export const restoreWorkflowVersion = async (
+  req: Request,
+  res: Response,
+  next: NextFunction
+): Promise<void> => {
+  try {
+    const { id, versionNumber } = req.params;
+    const versionStr = Array.isArray(versionNumber) ? versionNumber[0] : versionNumber;
+    const authReq = req as AuthenticatedRequest;
+    const userId = authReq.userId;
+
+    // Parse and validate version number
+    const parsedVersionNumber = parseInt(versionStr, 10);
+    if (isNaN(parsedVersionNumber) || parsedVersionNumber < 1) {
+      res.status(400).json({
+        success: false,
+        error: {
+          message: 'Invalid version number',
+          code: 'INVALID_VERSION_NUMBER',
+        },
+      } as ApiResponse);
+      return;
+    }
+
+    const client = await pool.connect();
+
+    try {
+      await client.query('BEGIN');
+
+      // Verify workflow exists and belongs to user
+      const workflowCheck = await client.query(
+        'SELECT id, version, name, description, category, tags, is_public FROM workflows WHERE id = $1 AND user_id = $2',
+        [id, userId]
+      );
+
+      if (workflowCheck.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({
+          success: false,
+          error: {
+            message: 'Workflow not found',
+            code: 'WORKFLOW_NOT_FOUND',
+          },
+        } as ApiResponse);
+        return;
+      }
+
+      const currentWorkflow = workflowCheck.rows[0];
+      const currentVersion = currentWorkflow.version || 1;
+
+      // Get version to restore
+      const versionResult = await client.query(
+        `SELECT * FROM workflow_version_history 
+         WHERE workflow_id = $1 AND version_number = $2`,
+        [id, parsedVersionNumber]
+      );
+
+      if (versionResult.rows.length === 0) {
+        await client.query('ROLLBACK');
+        res.status(404).json({
+          success: false,
+          error: {
+            message: 'Version not found',
+            code: 'VERSION_NOT_FOUND',
+          },
+        } as ApiResponse);
+        return;
+      }
+
+      const versionToRestore = versionResult.rows[0];
+
+      // Get current nodes and edges for snapshot
+      const currentNodesResult = await client.query(
+        'SELECT * FROM workflow_nodes WHERE workflow_id = $1',
+        [id]
+      );
+      const currentEdgesResult = await client.query(
+        'SELECT * FROM workflow_edges WHERE workflow_id = $1',
+        [id]
+      );
+
+      // Save current state to version history before restoring
+      await client.query(
+        `INSERT INTO workflow_version_history (
+          workflow_id, 
+          version_number, 
+          change_summary,
+          nodes_snapshot, 
+          edges_snapshot,
+          workflow_metadata,
+          created_by
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7)
+        ON CONFLICT (workflow_id, version_number) DO NOTHING`,
+        [
+          id,
+          currentVersion,
+          `Before restoring to version ${versionNumber}`,
+          JSON.stringify(currentNodesResult.rows),
+          JSON.stringify(currentEdgesResult.rows),
+          JSON.stringify({
+            name: currentWorkflow.name,
+            description: currentWorkflow.description,
+            category: currentWorkflow.category,
+            tags: currentWorkflow.tags,
+            is_public: currentWorkflow.is_public,
+          }),
+          userId,
+        ]
+      );
+
+      // Delete current edges and nodes
+      await client.query('DELETE FROM workflow_edges WHERE workflow_id = $1', [id]);
+      await client.query('DELETE FROM workflow_nodes WHERE workflow_id = $1', [id]);
+
+      // Restore nodes from snapshot
+      const restoredNodes = versionToRestore.nodes_snapshot;
+      const nodeIdMap = new Map<string, string>();
+
+      for (const node of restoredNodes) {
+        const result = await client.query(
+          `INSERT INTO workflow_nodes (
+            workflow_id, type, name, description, config, position, metadata
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7) RETURNING id`,
+          [
+            id,
+            node.type,
+            node.name,
+            node.description,
+            JSON.stringify(node.config),
+            JSON.stringify(node.position),
+            JSON.stringify(node.metadata),
+          ]
+        );
+        nodeIdMap.set(node.id, result.rows[0].id);
+      }
+
+      // Restore edges from snapshot
+      const restoredEdges = versionToRestore.edges_snapshot;
+      for (const edge of restoredEdges) {
+        const sourceId = nodeIdMap.get(edge.source_node_id);
+        const targetId = nodeIdMap.get(edge.target_node_id);
+
+        if (sourceId && targetId) {
+          await client.query(
+            `INSERT INTO workflow_edges (
+              workflow_id, source_node_id, target_node_id, source_handle, target_handle, condition, data_mapping
+            ) VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+            [
+              id,
+              sourceId,
+              targetId,
+              edge.source_handle,
+              edge.target_handle,
+              edge.condition ? JSON.stringify(edge.condition) : null,
+              edge.data_mapping ? JSON.stringify(edge.data_mapping) : null,
+            ]
+          );
+        }
+      }
+
+      // Update workflow version to the restored version (true rollback)
+      const workflowMetadata = versionToRestore.workflow_metadata || {};
+
+      await client.query(
+        `UPDATE workflows SET 
+          version = $1,
+          version_created_at = NOW(),
+          updated_at = NOW(),
+          name = COALESCE($2, name),
+          description = COALESCE($3, description)
+        WHERE id = $4`,
+        [parsedVersionNumber, workflowMetadata.name, workflowMetadata.description, id]
+      );
+
+      // Delete version history entries newer than the restored version
+      await client.query(
+        `DELETE FROM workflow_version_history 
+         WHERE workflow_id = $1 AND version_number > $2`,
+        [id, parsedVersionNumber]
+      );
+
+      await client.query('COMMIT');
+
+      logger.info({ workflowId: id, restoredToVersion: parsedVersionNumber }, 'Workflow version restored (rollback)');
+
+      const response: ApiResponse = {
+        success: true,
+        data: {
+          workflowId: id,
+          restoredToVersion: parsedVersionNumber,
+          message: `Workflow rolled back to version ${parsedVersionNumber}`,
+        },
+        meta: {
+          timestamp: new Date().toISOString(),
+        },
+      };
+
+      res.json(response);
+    } catch (error) {
+      await client.query('ROLLBACK');
+      logger.error({ error, workflowId: id, versionNumber }, 'Error restoring workflow version');
+      throw error;
+    } finally {
+      client.release();
+    }
+  } catch (error) {
+    logger.error({ error }, 'Error in restoreWorkflowVersion');
     next(error);
   }
 };

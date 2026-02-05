@@ -24,6 +24,7 @@ import * as migration020 from "./020_add_lending_node_type";
 import * as migration021 from "./021_add_aave_compound_node_types";
 import * as migration022 from "./022_add_llm_transform_node_type";
 import * as migration023 from "./023_add_workflow_visibility_fields";
+import * as migration024 from "./024_add_workflow_versioning";
 
 // Load environment variables
 dotenv.config();
@@ -181,6 +182,12 @@ const migrations: Migration[] = [
     name: "023_add_workflow_visibility_fields",
     up: migration023.up,
     down: migration023.down,
+  },
+  {
+    id: 24,
+    name: "024_add_workflow_versioning",
+    up: migration024.up,
+    down: migration024.down,
   },
 ];
 
