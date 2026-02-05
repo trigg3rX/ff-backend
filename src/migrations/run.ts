@@ -23,6 +23,8 @@ import * as migration019 from "./019_create_lending_executions_table";
 import * as migration020 from "./020_add_lending_node_type";
 import * as migration021 from "./021_add_aave_compound_node_types";
 import * as migration022 from "./022_add_llm_transform_node_type";
+import * as migration023 from "./023_add_lifi_node_type";
+import * as migration024 from "./024_add_lifi_swap_provider";
 
 // Load environment variables
 dotenv.config();
@@ -174,6 +176,18 @@ const migrations: Migration[] = [
     name: "022_add_llm_transform_node_type",
     up: migration022.up,
     down: migration022.down,
+  },
+  {
+    id: 23,
+    name: "023_add_lifi_node_type",
+    up: migration023.up,
+    down: migration023.down,
+  },
+  {
+    id: 24,
+    name: "024_add_lifi_swap_provider",
+    up: migration024.up,
+    down: migration024.down,
   },
 ];
 
