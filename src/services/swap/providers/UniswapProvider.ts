@@ -12,6 +12,7 @@ import { ISwapProvider } from '../interfaces/ISwapProvider';
 import { getProvider } from '../../../config/providers';
 import { CHAIN_CONFIGS } from '../../../config/chains';
 import { logger } from '../../../utils/logger';
+import { AppError } from '../../../middleware/error-handler';
 
 // Uniswap V3 SwapRouter02 ABI (minimal - for executing swaps)
 const UNISWAP_V3_ROUTER_ABI = [
@@ -90,6 +91,11 @@ export class UniswapProvider implements ISwapProvider {
       config.destinationToken.address
     );
 
+    // Check if tokens are same
+    if (sourceToken.address.toLowerCase() === destToken.address.toLowerCase()) {
+      throw new AppError(400, 'Source and destination tokens cannot be the same', 'INVALID_TOKEN_PAIR');
+    }
+
     try {
       // Try different fee tiers to find the best quote
       const feeResults = await this.tryMultipleFees(
@@ -100,7 +106,7 @@ export class UniswapProvider implements ISwapProvider {
       );
 
       if (!feeResults || feeResults.length === 0) {
-        throw new Error('No liquidity found for this token pair across all fee tiers');
+        throw new AppError(400, 'No liquidity found for this token pair across Uniswap fee tiers', 'INSUFFICIENT_LIQUIDITY');
       }
 
       // Select the best quote (highest output for exact input, lowest input for exact output)
@@ -138,7 +144,8 @@ export class UniswapProvider implements ISwapProvider {
       return quote;
     } catch (error) {
       logger.error({ error, chain, config }, 'Failed to get Uniswap V3 quote');
-      throw new Error(`Failed to get Uniswap V3 quote: ${(error as Error).message}`);
+      if (error instanceof AppError) throw error;
+      throw new AppError(500, `Failed to get Uniswap V3 quote: ${(error as Error).message}`, 'QUOTE_FAILED');
     }
   }
 
@@ -317,7 +324,7 @@ export class UniswapProvider implements ISwapProvider {
     for (const fee of fees) {
       try {
         let result;
-        
+
         if (config.swapType === SwapType.EXACT_INPUT) {
           // Quote for exact input
           const params = {
@@ -329,10 +336,10 @@ export class UniswapProvider implements ISwapProvider {
           };
 
           result = await quoter.quoteExactInputSingle.staticCall(params);
-          
+
           const slippage = config.slippageTolerance || 0.5;
           const slippageMultiplier = 1 - slippage / 100;
-          
+
           results.push({
             fee,
             amountIn: config.amount,
@@ -355,10 +362,10 @@ export class UniswapProvider implements ISwapProvider {
           };
 
           result = await quoter.quoteExactOutputSingle.staticCall(params);
-          
+
           const slippage = config.slippageTolerance || 0.5;
           const slippageMultiplier = 1 + slippage / 100;
-          
+
           results.push({
             fee,
             amountIn: result[0].toString(),
@@ -392,12 +399,12 @@ export class UniswapProvider implements ISwapProvider {
 
     if (swapType === SwapType.EXACT_INPUT) {
       // For exact input, select the quote with highest output
-      return results.reduce((best, current) => 
+      return results.reduce((best, current) =>
         BigInt(current.amountOut) > BigInt(best.amountOut) ? current : best
       );
     } else {
       // For exact output, select the quote with lowest input
-      return results.reduce((best, current) => 
+      return results.reduce((best, current) =>
         BigInt(current.amountIn) < BigInt(best.amountIn) ? current : best
       );
     }

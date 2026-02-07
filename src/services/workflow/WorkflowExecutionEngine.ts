@@ -121,9 +121,9 @@ export class WorkflowExecutionEngine {
           : 'Workflow execution completed'
       );
 
-      // Emit execution completed event
+      // Emit execution completed/waiting event
       executionEventEmitter.emitExecutionEvent({
-        type: 'execution:completed',
+        type: context.status === ExecutionStatus.WAITING_FOR_SIGNATURE ? 'execution:waiting' : 'execution:completed',
         executionId,
         workflowId,
         status: context.status,
@@ -312,25 +312,35 @@ export class WorkflowExecutionEngine {
 
       const result = await processor.execute(nodeInput);
 
+      // Check if node is waiting for signature (new status from processor)
+      const nodeStatus = (result as any).status || (result.success ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILED);
+
       // Update node execution record
-      await this.updateNodeExecution(nodeExecutionId, result);
+      await this.updateNodeExecution(nodeExecutionId, result, nodeStatus);
 
       // Store output in context
       context.nodeOutputs.set(node.id, result.output);
       context.currentNodeId = node.id;
 
-      // Emit node completed/failed event
+      // Emit node event
       executionEventEmitter.emitExecutionEvent({
-        type: result.success ? 'node:completed' : 'node:failed',
+        type: nodeStatus === ExecutionStatus.WAITING_FOR_SIGNATURE ? 'node:waiting' : (result.success ? 'node:completed' : 'node:failed'),
         executionId: context.executionId,
         workflowId: context.workflowId,
         nodeId: node.id,
         nodeType: node.type,
-        status: result.success ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILED,
+        status: nodeStatus,
         output: result.output,
         error: result.error,
         timestamp: new Date(),
       });
+
+      // If node is waiting for signature, stop workflow execution and set state to WAITING_FOR_SIGNATURE
+      if (nodeStatus === ExecutionStatus.WAITING_FOR_SIGNATURE) {
+        logger.info({ nodeId: node.id, executionId: context.executionId }, 'Workflow execution paused: waiting for user signature');
+        context.status = ExecutionStatus.WAITING_FOR_SIGNATURE;
+        break;
+      }
 
       // Handle IF nodes - store branch decision
       if (node.type === NodeType.IF && result.output?.branchToFollow) {
@@ -431,7 +441,7 @@ export class WorkflowExecutionEngine {
         );
         return null;
       }
-    }    
+    }
 
     // For regular nodes, follow the first outgoing edge
     const outgoingEdges = workflow.edges.filter(e => e.sourceNodeId === currentNodeId);
@@ -738,7 +748,8 @@ export class WorkflowExecutionEngine {
    */
   private async updateNodeExecution(
     nodeExecutionId: string,
-    result: any
+    result: any,
+    status?: ExecutionStatus
   ): Promise<void> {
     // Custom JSON replacer to handle BigInt values
     const jsonReplacer = (_key: string, value: any) => {
@@ -755,7 +766,7 @@ export class WorkflowExecutionEngine {
       WHERE id = $6`,
       [
         JSON.stringify(result.output, jsonReplacer),
-        result.success ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILED,
+        status || (result.success ? ExecutionStatus.SUCCESS : ExecutionStatus.FAILED),
         result.error ? JSON.stringify(result.error, jsonReplacer) : null,
         result.metadata.completedAt,
         result.metadata.duration,

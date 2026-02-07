@@ -9,6 +9,7 @@ import {
   DBSwapExecution,
   SafeTransactionHashResult,
 } from '../../types';
+import { AppError } from '../../middleware/error-handler';
 import { swapProviderFactory } from './providers/SwapProviderFactory';
 import { waitForTransaction } from '../../config/providers';
 import { SECURITY_CONFIG, VALIDATION_CONFIG, CHAIN_CONFIGS } from '../../config/chains';
@@ -76,7 +77,7 @@ export class SwapExecutionService {
     }
     return routerAddress;
   }
-  
+
   /**
    * Validate swap configuration
    */
@@ -141,7 +142,7 @@ export class SwapExecutionService {
     // Validate first
     const validation = await this.validateSwapConfig(chain, provider, config);
     if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+      throw new AppError(400, `Validation failed: ${validation.errors.join(', ')}`, 'VALIDATION_FAILED');
     }
 
     const swapProvider = swapProviderFactory.getProvider(provider);
@@ -177,9 +178,11 @@ export class SwapExecutionService {
     // Get user's Safe wallet address
     const safeAddress = await UserModel.getSafeAddressByChain(userId, chainId);
     if (!safeAddress) {
-      throw new Error(
+      throw new AppError(
+        404,
         `Safe wallet not found for user ${userId} on chain ${chainId}. ` +
-        `Please create a Safe wallet first via /api/v1/relay/create-safe`
+        `Please create a Safe wallet first via /api/v1/relay/create-safe`,
+        'SAFE_NOT_FOUND'
       );
     }
 
@@ -192,7 +195,7 @@ export class SwapExecutionService {
     // Validate configuration
     const validation = await this.validateSwapConfig(chain, provider, swapConfig);
     if (!validation.valid) {
-      throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+      throw new AppError(400, `Validation failed: ${validation.errors.join(', ')}`, 'VALIDATION_FAILED');
     }
 
     // Get provider and quote
@@ -376,8 +379,10 @@ export class SwapExecutionService {
       // Get user's Safe wallet address
       const safeAddress = await UserModel.getSafeAddressByChain(userId, chainId);
       if (!safeAddress) {
-        throw new Error(
-          `Safe wallet not found for user ${userId} on chain ${chainId}`
+        throw new AppError(
+          404,
+          `Safe wallet not found for user ${userId} on chain ${chainId}`,
+          'SAFE_NOT_FOUND'
         );
       }
 
@@ -387,7 +392,7 @@ export class SwapExecutionService {
       // Validate configuration (non-authoritative; actual tx payload comes from cached Safe tx if present)
       const validation = await this.validateSwapConfig(chain, provider, swapConfig);
       if (!validation.valid) {
-        throw new Error(`Validation failed: ${validation.errors.join(', ')}`);
+        throw new AppError(400, `Validation failed: ${validation.errors.join(', ')}`, 'VALIDATION_FAILED');
       }
 
       // Create swap execution record
@@ -415,14 +420,14 @@ export class SwapExecutionService {
       // Use cached Safe transaction payload if available; otherwise fall back to rebuilding (may revert if provider tx changes).
       const effectiveSafeTxData =
         cachedSafe?.safeTxData?.to &&
-        cachedSafe?.safeTxData?.data &&
-        cachedSafe?.safeTxData?.value !== undefined
+          cachedSafe?.safeTxData?.data &&
+          cachedSafe?.safeTxData?.value !== undefined
           ? {
-              to: cachedSafe.safeTxData.to as string,
-              value: BigInt(cachedSafe.safeTxData.value as string),
-              data: cachedSafe.safeTxData.data as string,
-              operation: Number(cachedSafe.safeTxData.operation ?? 0),
-            }
+            to: cachedSafe.safeTxData.to as string,
+            value: BigInt(cachedSafe.safeTxData.value as string),
+            data: cachedSafe.safeTxData.data as string,
+            operation: Number(cachedSafe.safeTxData.operation ?? 0),
+          }
           : null;
 
       if (!effectiveSafeTxData) {
@@ -445,7 +450,7 @@ export class SwapExecutionService {
       const result = await safeTransactionService.executeWithSignatures(
         safeAddress,
         chainId,
-        effectiveSafeTxData ? effectiveSafeTxData.to : (() => { throw new Error('Missing cached Safe transaction payload'); })(),
+        effectiveSafeTxData ? effectiveSafeTxData.to : (() => { throw new AppError(400, 'Missing cached Safe transaction payload. Please recreate the transaction.', 'CACHE_MISS'); })(),
         effectiveSafeTxData ? effectiveSafeTxData.value : 0n,
         effectiveSafeTxData ? effectiveSafeTxData.data : '0x',
         effectiveSafeTxData ? effectiveSafeTxData.operation : 0,
@@ -606,7 +611,7 @@ export class SwapExecutionService {
         ...config,
         recipient: safeAddress || config.recipient || config.walletAddress,
       };
-      
+
       // Validate configuration
       const validation = await this.validateSwapConfig(chain, provider, swapConfig);
       if (!validation.valid) {
@@ -635,17 +640,37 @@ export class SwapExecutionService {
       // Simulate transaction if enabled (default: true)
       if (swapConfig.simulateFirst !== false) {
         logger.debug('Simulating transaction...');
-        const simulation = await swapProvider.simulateTransaction(chain, transaction);
+        try {
+          const simulation = await swapProvider.simulateTransaction(chain, transaction);
 
-        if (!simulation.success) {
-          throw new Error(`Simulation failed: ${simulation.error}`);
-        }
+          if (!simulation.success) {
+            // STF = Safe Transfer Failed (Uniswap error code for lack of allowance/balance)
+            // If using a Safe, we often bundle approvals, so simulation of only the swap might fail.
+            if (safeAddress) {
+              logger.warn(
+                { error: simulation.error, safeAddress, nodeExecutionId: normalizedNodeExecutionId },
+                'Simulation failed for Safe swap (often due to missing allowance/balance). Continuing as Safe multicall may resolve this.'
+              );
+            } else {
+              throw new Error(`Simulation failed: ${simulation.error}`);
+            }
+          }
 
-        // Update gas estimate from simulation
-        if (simulation.gasEstimate) {
-          transaction.gasLimit = (
-            BigInt(simulation.gasEstimate) * BigInt(120) / BigInt(100)
-          ).toString(); // Add 20% buffer
+          // Update gas estimate from simulation if it succeeded
+          if (simulation.success && simulation.gasEstimate) {
+            transaction.gasLimit = (
+              BigInt(simulation.gasEstimate) * BigInt(120) / BigInt(100)
+            ).toString(); // Add 20% buffer
+          }
+        } catch (simError) {
+          if (safeAddress) {
+            logger.warn(
+              { error: simError, safeAddress, nodeExecutionId: normalizedNodeExecutionId },
+              'Simulation threw error for Safe swap. Continuing...'
+            );
+          } else {
+            throw simError;
+          }
         }
       }
 
@@ -766,14 +791,50 @@ export class SwapExecutionService {
           );
         } else {
           // No signature provided - need to build hash for user to sign
-          const safeTxHash = await safeTransactionService.buildSafeTransactionHash(
+          const safeTxOperation = needsApproval ? 1 : 0; // 1 = DELEGATECALL for multicall, 0 = CALL
+
+          const { safeTxHash, nonce: safeNonce } = await safeTransactionService.buildSafeTransactionHashWithNonce(
             safeAddress,
             chainId,
             safeTxData.to,
             safeTxData.value,
             safeTxData.data,
-            0 // CALL operation
+            safeTxOperation
           );
+
+          // Cache the exact Safe tx payload used to produce the hash.
+          // This prevents mismatches where execute step rebuilds a slightly different tx,
+          // which would invalidate the user signature and revert (e.g. GS013).
+          try {
+            await redisClient.set(
+              this.safeTxCacheKey(nodeExecutionId),
+              JSON.stringify({
+                chain,
+                provider,
+                chainId,
+                safeAddress,
+                safeTxHash,
+                needsApproval,
+                safeNonce: safeNonce.toString(), // Cache the nonce used to build the hash
+                safeTxData: {
+                  to: safeTxData.to,
+                  value: safeTxData.value.toString(),
+                  data: safeTxData.data,
+                  operation: safeTxOperation,
+                },
+                cachedAt: Date.now(),
+              }),
+              {
+                EX: 10 * 60, // 10 minutes
+              }
+            );
+            logger.info(
+              { nodeExecutionId, safeTxHash, safeAddress },
+              'Cached Safe tx payload for signature flow'
+            );
+          } catch (cacheErr) {
+            logger.warn({ error: cacheErr, nodeExecutionId }, 'Failed to cache Safe tx payload');
+          }
 
           // Return result indicating signature is required
           return {
@@ -789,7 +850,7 @@ export class SwapExecutionService {
               to: safeTxData.to,
               value: safeTxData.value.toString(),
               data: safeTxData.data,
-              operation: 0,
+              operation: safeTxOperation,
             },
             errorMessage: 'User signature required. Please sign the transaction hash and call executeSwapWithSignature.',
             errorCode: 'SIGNATURE_REQUIRED',

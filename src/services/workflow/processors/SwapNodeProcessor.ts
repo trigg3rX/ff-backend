@@ -5,6 +5,7 @@ import {
   SwapNodeConfig,
   SwapProvider,
   SupportedChain,
+  ExecutionStatus,
 } from '../../../types';
 import { INodeProcessor } from '../interfaces/INodeProcessor';
 import { swapExecutionService } from '../../swap/SwapExecutionService';
@@ -52,6 +53,24 @@ export class SwapNodeProcessor implements INodeProcessor {
       const endTime = new Date();
 
       if (!result.success) {
+        // Special case: User signature required for Safe transaction
+        if (result.requiresSignature) {
+          const endTime = new Date();
+          logger.info({ nodeId: input.nodeId, safeTxHash: result.safeTxHash }, 'Swap node waiting for user signature');
+
+          return {
+            nodeId: input.nodeId,
+            success: true, // We mark as true so the engine doesn't throw, but status is WAITING_FOR_SIGNATURE
+            status: ExecutionStatus.WAITING_FOR_SIGNATURE,
+            output: result,
+            metadata: {
+              startedAt: startTime,
+              completedAt: endTime,
+              duration: endTime.getTime() - startTime.getTime(),
+            },
+          } as any;
+        }
+
         return {
           nodeId: input.nodeId,
           success: false,

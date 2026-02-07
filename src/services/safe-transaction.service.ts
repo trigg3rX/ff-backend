@@ -46,6 +46,28 @@ export class SafeTransactionService {
     data: string,
     operation: number = 0 // 0 = CALL, 1 = DELEGATECALL
   ): Promise<string> {
+    const result = await this.buildSafeTransactionHashWithNonce(
+      safeAddress,
+      chainId,
+      to,
+      value,
+      data,
+      operation
+    );
+    return result.safeTxHash;
+  }
+
+  /**
+   * Build Safe transaction hash and return with nonce (for caching)
+   */
+  async buildSafeTransactionHashWithNonce(
+    safeAddress: string,
+    chainId: SupportedChainId,
+    to: string,
+    value: bigint,
+    data: string,
+    operation: number = 0 // 0 = CALL, 1 = DELEGATECALL
+  ): Promise<{ safeTxHash: string; nonce: bigint }> {
     const provider = getRelayerService().getProvider(chainId);
 
     // Get Safe contract instance
@@ -74,7 +96,7 @@ export class SafeTransactionService {
       nonce
     );
 
-    return txHash;
+    return { safeTxHash: txHash, nonce };
   }
 
   /**
@@ -424,7 +446,7 @@ export class SafeTransactionService {
     // MultiSend expects transactions in a specific format:
     // Each transaction is encoded as: operation (1 byte) + to (20 bytes) + value (32 bytes) + dataLength (32 bytes) + data (variable)
     // operation: 0 = CALL, 1 = DELEGATECALL
-    
+
     const encodeTransaction = (
       operation: number,
       to: string,

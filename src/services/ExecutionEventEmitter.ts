@@ -8,9 +8,11 @@ export type ExecutionEventType =
     | 'execution:started'
     | 'execution:completed'
     | 'execution:failed'
+    | 'execution:waiting'
     | 'node:started'
     | 'node:completed'
-    | 'node:failed';
+    | 'node:failed'
+    | 'node:waiting';
 
 /**
  * Execution Event Data

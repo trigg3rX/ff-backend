@@ -5,7 +5,10 @@ import {
   getSwapExecution,
   getTokenInfo,
   buildSwapTransaction,
+  buildSafeSwapTransaction,
+  executeSwapWithSignature,
 } from '../controllers/swap.controller';
+import { verifyPrivyToken } from '../middleware/privy-auth';
 import { validateParams, validateBody } from '../middleware/validation';
 import {
   swapProviderChainParamsSchema,
@@ -19,8 +22,14 @@ const router = Router();
 // Get quote
 router.post('/quote/:provider/:chain', validateParams(swapProviderChainParamsSchema), validateBody(swapInputConfigSchema), getSwapQuote);
 
-// Build unsigned transaction (for frontend wallet signing)
+// Build unsigned transaction (for frontend wallet signing/EOA)
 router.post('/build-transaction/:provider/:chain', validateParams(swapProviderChainParamsSchema), validateBody(swapInputConfigSchema), buildSwapTransaction);
+
+// Build Safe transaction hash for signing (requires auth)
+router.post('/build-safe-transaction/:provider/:chain', verifyPrivyToken, validateParams(swapProviderChainParamsSchema), validateBody(swapInputConfigSchema), buildSafeSwapTransaction);
+
+// Execute swap with user signature (requires auth)
+router.post('/execute-with-signature/:provider/:chain', verifyPrivyToken, validateParams(swapProviderChainParamsSchema), executeSwapWithSignature);
 
 // Get supported providers for chain
 router.get('/providers/:chain', validateParams(swapChainParamsSchema), getSupportedProviders);
