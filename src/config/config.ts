@@ -53,7 +53,7 @@ export const serverConfig = {
 export const dbConfig = {
   host: getOptionalEnv("DB_HOST", "localhost"),
   port: getOptionalNumberEnv("DB_PORT", 5432),
-  database: getOptionalEnv("DB_NAME", "agentic"),
+  database: getOptionalEnv("DB_NAME", "agentic_workflow"),
   user: getOptionalEnv("DB_USER", "postgres"),
   password: getOptionalEnv("DB_PASSWORD", "postgres"),
   poolMin: getOptionalNumberEnv("DB_POOL_MIN", 1),
@@ -119,35 +119,54 @@ export const relayerConfig = {
 } as const;
 
 /**
+ * Safe contract addresses: per-chain env (e.g. SAFE_WALLET_FACTORY_ADDRESS_11155111)
+ * falls back to single SAFE_WALLET_FACTORY_ADDRESS / SAFE_MODULE_ADDRESS for all chains.
+ */
+function getSafeFactoryForChain(chainId: number): string {
+  return (
+    process.env[`SAFE_WALLET_FACTORY_ADDRESS_${chainId}`] ||
+    process.env.SAFE_WALLET_FACTORY_ADDRESS ||
+    ""
+  );
+}
+function getSafeModuleForChain(chainId: number): string {
+  return (
+    process.env[`SAFE_MODULE_ADDRESS_${chainId}`] ||
+    process.env.SAFE_MODULE_ADDRESS ||
+    ""
+  );
+}
+
+/**
  * Chain-specific configurations
  */
 export const chainConfigs: Record<SupportedChainId, ChainConfig> = {
   [SUPPORTED_CHAINS.ETHEREUM_SEPOLIA]: {
     chainId: SUPPORTED_CHAINS.ETHEREUM_SEPOLIA,
     rpcUrl: getRequiredEnv("ETHEREUM_SEPOLIA_RPC_URL"),
-    factoryAddress: getRequiredEnv("SAFE_WALLET_FACTORY_ADDRESS_11155111"),
-    moduleAddress: getRequiredEnv("SAFE_MODULE_ADDRESS_11155111"),
+    factoryAddress: getSafeFactoryForChain(SUPPORTED_CHAINS.ETHEREUM_SEPOLIA),
+    moduleAddress: getSafeModuleForChain(SUPPORTED_CHAINS.ETHEREUM_SEPOLIA),
     name: "Ethereum Sepolia",
   },
   [SUPPORTED_CHAINS.ARBITRUM_SEPOLIA]: {
     chainId: SUPPORTED_CHAINS.ARBITRUM_SEPOLIA,
     rpcUrl: getRequiredEnv("ARBITRUM_SEPOLIA_RPC_URL"),
-    factoryAddress: getRequiredEnv("SAFE_WALLET_FACTORY_ADDRESS_421614"),
-    moduleAddress: getRequiredEnv("SAFE_MODULE_ADDRESS_421614"),
+    factoryAddress: getSafeFactoryForChain(SUPPORTED_CHAINS.ARBITRUM_SEPOLIA),
+    moduleAddress: getSafeModuleForChain(SUPPORTED_CHAINS.ARBITRUM_SEPOLIA),
     name: "Arbitrum Sepolia",
   },
   [SUPPORTED_CHAINS.ARBITRUM_MAINNET]: {
     chainId: SUPPORTED_CHAINS.ARBITRUM_MAINNET,
     rpcUrl: getRequiredEnv("ARBITRUM_RPC_URL"),
-    factoryAddress: getRequiredEnv("SAFE_WALLET_FACTORY_ADDRESS_42161"),
-    moduleAddress: getRequiredEnv("SAFE_MODULE_ADDRESS_42161"),
+    factoryAddress: getSafeFactoryForChain(SUPPORTED_CHAINS.ARBITRUM_MAINNET),
+    moduleAddress: getSafeModuleForChain(SUPPORTED_CHAINS.ARBITRUM_MAINNET),
     name: "Arbitrum Mainnet",
   },
   [SUPPORTED_CHAINS.BASE_MAINNET]: {
     chainId: SUPPORTED_CHAINS.BASE_MAINNET,
     rpcUrl: getOptionalEnv("BASE_RPC_URL", "https://mainnet.base.org"),
-    factoryAddress: getOptionalEnv("SAFE_WALLET_FACTORY_ADDRESS_8453", "0x0000000000000000000000000000000000000000"),
-    moduleAddress: getOptionalEnv("SAFE_MODULE_ADDRESS_8453", "0x0000000000000000000000000000000000000000"),
+    factoryAddress: getSafeFactoryForChain(SUPPORTED_CHAINS.BASE_MAINNET) || "0x0000000000000000000000000000000000000000",
+    moduleAddress: getSafeModuleForChain(SUPPORTED_CHAINS.BASE_MAINNET) || "0x0000000000000000000000000000000000000000",
     name: "Base",
   },
 } as const;
@@ -233,6 +252,47 @@ export const rateLimitConfig = {
     5
   ),
 } as const;
+
+/**
+ * ENS subdomain sponsorship: 3 sponsored txs per 0.5 USDC (per 1 week period).
+ * Matches FlowForgeEthUsdcPricer: PERIOD_SECONDS = 7 * 24 * 3600, PRICE_PER_PERIOD = 0.5e6.
+ */
+export const SPONSORED_TXS_PER_PERIOD = 3;
+export const ENS_PRICER_PERIOD_SECONDS = 7 * 24 * 3600; // 604800
+
+/**
+ * ENS chain IDs (Ethereum mainnet = 1, Sepolia = 11155111)
+ */
+export const ENS_CHAIN_IDS = {
+  ETHEREUM_MAINNET: 1,
+  ETHEREUM_SEPOLIA: 11155111,
+} as const;
+
+export type EnsChainId =
+  | typeof ENS_CHAIN_IDS.ETHEREUM_MAINNET
+  | typeof ENS_CHAIN_IDS.ETHEREUM_SEPOLIA;
+
+/**
+ * ENS Configuration (optional): subdomain registry and pricer per chain.
+ * Used to verify/grant sponsorship allowance from subdomain registration.
+ */
+export const ensConfig: Partial<
+  Record<
+    EnsChainId,
+    { registryAddress: string; pricerAddress: string; rpcUrl?: string }
+  >
+> = {
+  [ENS_CHAIN_IDS.ETHEREUM_MAINNET]: {
+    registryAddress: getOptionalEnv("SUBDOMAIN_REGISTRY_ADDRESS_1", ""),
+    pricerAddress: getOptionalEnv("PRICER_ADDRESS_1", ""),
+    rpcUrl: process.env.ETHEREUM_MAINNET_RPC_URL,
+  },
+  [ENS_CHAIN_IDS.ETHEREUM_SEPOLIA]: {
+    registryAddress: getOptionalEnv("SUBDOMAIN_REGISTRY_ADDRESS_11155111", ""),
+    pricerAddress: getOptionalEnv("PRICER_ADDRESS_11155111", ""),
+    rpcUrl: process.env.ETHEREUM_SEPOLIA_RPC_URL,
+  },
+};
 
 /**
  * Complete configuration object
